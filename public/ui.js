@@ -406,6 +406,55 @@
   // Exponer
   window.UI = UI;
 
+  // ------------------------------------------------
+  // Indicador de Cola Offline (Badge flotante)
+  // ------------------------------------------------
+  let offlineBadgeEl = null;
+
+  UI.updateOfflineBadge = function (count) {
+    if (!offlineBadgeEl) {
+      offlineBadgeEl = document.createElement('div');
+      offlineBadgeEl.id = 'offline-sync-badge';
+      Object.assign(offlineBadgeEl.style, {
+        position: 'fixed', bottom: '20px', right: '20px',
+        zIndex: '9998', padding: '10px 18px', borderRadius: '30px',
+        display: 'none', alignItems: 'center', gap: '8px',
+        color: 'white', fontWeight: '600', fontSize: '0.9rem',
+        boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+        transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+        backdropFilter: 'blur(10px)', border: '1px solid rgba(255,255,255,0.1)'
+      });
+      document.body.appendChild(offlineBadgeEl);
+    }
+
+    if (count === 'syncing') {
+      offlineBadgeEl.style.display = 'flex';
+      offlineBadgeEl.style.background = 'rgba(59, 130, 246, 0.9)'; // Azul
+      offlineBadgeEl.innerHTML = '<i class="fas fa-sync fa-spin"></i> Sincronizando...';
+      offlineBadgeEl.style.transform = 'translateY(0)';
+    } else if (count === 'done') {
+      offlineBadgeEl.style.display = 'flex';
+      offlineBadgeEl.style.background = 'rgba(16, 185, 129, 0.9)'; // Verde
+      offlineBadgeEl.innerHTML = '<i class="fas fa-check-circle"></i> ¡Sincronizado! ✅';
+      offlineBadgeEl.style.transform = 'scale(1.05)';
+      setTimeout(() => {
+        offlineBadgeEl.style.opacity = '0';
+        offlineBadgeEl.style.transform = 'translateY(20px)';
+        setTimeout(() => {
+          offlineBadgeEl.style.display = 'none';
+          offlineBadgeEl.style.opacity = '1';
+        }, 300);
+      }, 3000);
+    } else if (count > 0) {
+      offlineBadgeEl.style.display = 'flex';
+      offlineBadgeEl.style.background = 'rgba(249, 115, 22, 0.9)'; // Naranja
+      offlineBadgeEl.innerHTML = `<i class="fas fa-cloud-upload-alt"></i> ${count} en cola`;
+      offlineBadgeEl.style.transform = 'translateY(0)';
+    } else {
+      offlineBadgeEl.style.display = 'none';
+    }
+  };
+
   // Sobrescribir alert nativo globalmente para aplicar el diseño UI.alert en toda la plataforma
   const nativeAlert = window.alert;
   window.alert = function (msg) {

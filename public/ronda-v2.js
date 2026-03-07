@@ -316,6 +316,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         sincronizarDatos(true);
       }
 
+      // Inicializar badge de cola
+      if (window.OfflineQueue && window.UI && UI.updateOfflineBadge) {
+        window.OfflineQueue.all().then(tasks => {
+          if (tasks && tasks.length > 0) UI.updateOfflineBadge(tasks.length);
+        }).catch(() => { });
+      }
+
     } catch (e) {
       console.error('[Ronda] Error:', e);
     }
@@ -1508,7 +1515,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         console.log('[Ronda] Punto completado: Guardado parcial en Firebase.');
       }).catch(err => {
         console.warn('[Ronda] Guardado parcial falló (Offline):', err.code);
+        // Si falló por red, el sync.js normal se encargará después si lo pusieramos en cola,
+        // pero por ahora los puntos parciales confían en la persistencia local de Firestore.
       });
+
+      // Actualizar badge si hay cola (ronda-v2 usualmente guarda puntos en RONDAS_COMPLETADAS que tiene persistencia propia)
 
       console.log('[Ronda] Punto completado:', indice);
     } catch (e) {
@@ -1670,18 +1681,48 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       const estado = determinarEstadoRonda();
       const horarioTermino = firebase.firestore.Timestamp.now();
-
-      // Guardar estado final en Firebase
-      await db.collection('RONDAS_COMPLETADAS').doc(rondaIdActual).update({
+      const payloadFinal = {
         estado: estado,
-        horarioTermino: horarioTermino
-      });
+        horarioTermino: horarioTermino,
+        ultimaActualizacion: horarioTermino
+      };
 
-      // Limpiar cache
+      // 1. ACTUALIZAR CACHE LOCAL PRIMERO
+      await RONDA_STORAGE.guardarEnCache(rondaIdActual, { ...rondaEnProgreso, ...payloadFinal });
+
+      // 2. INTENTAR GUARDAR EN FIREBASE CON TIMEOUT
+      const intentarGuardarOnline = async () => {
+        if (!navigator.onLine) throw new Error('Offline');
+
+        const timeoutPromise = new Promise((_, rej) => setTimeout(() => rej(new Error('Timeout')), 4000));
+        const updatePromise = db.collection('RONDAS_COMPLETADAS').doc(rondaIdActual).update(payloadFinal);
+
+        await Promise.race([updatePromise, timeoutPromise]);
+        console.log('[Ronda] Finalización guardada en Firebase.');
+      };
+
+      try {
+        await intentarGuardarOnline();
+      } catch (err) {
+        console.warn('[Ronda] Falló cierre online, guardando en cola offline:', err.message);
+        if (window.OfflineQueue) {
+          await window.OfflineQueue.add({
+            kind: 'ronda-programada-end',
+            docId: rondaIdActual,
+            cliente: userCtx.cliente,
+            unidad: userCtx.unidad,
+            data: payloadFinal,
+            createdAt: Date.now()
+          });
+        }
+      }
+
+      // Limpiar cache de la sesión activa (ya que ya se cerró)
       await RONDA_STORAGE.limpiarCache(rondaIdActual);
 
       ocultarOverlay();
       mostrarResumen(estado);
+      const tempRonda = { ...rondaEnProgreso }; // Backup para el resumen
       rondaEnProgreso = null;
       rondaIdActual = null;
 
@@ -2333,7 +2374,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             const nombreOnline = `${d.NOMBRES || ''} ${d.APELLIDOS || ''}`.trim();
             if (nombreOnline.length > 0) {
               nombreCompleto = nombreOnline;
-              userCtx.nombre = nombreCompleto;
+              userCtx.nombre = nombreOnline;
             }
           }
         } catch (e) { console.warn('Fetch nombre failed', e); }
@@ -2379,17 +2420,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             data: registro,
             createdAt: Date.now()
           });
-          if (typeof UI !== 'undefined' && UI.toast) {
-            UI.toast('Guardado offline. Se enviará al conectar.');
-          } else {
-            console.log('[Ronda Manual] Offline: Guardado en cola.');
-          }
         } else {
           throw new Error('No hay conexión y la cola offline no está disponible.');
         }
       } else {
         // MODO ONLINE: Intentar guardar directo
-        // Si falla (ej: timeout), caer a la cola si es posible
         try {
           // Timeout de 4s
           const timeoutPromise = new Promise((_, rej) => setTimeout(() => rej(new Error('Timeout')), 4000));
@@ -2398,8 +2433,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           const ref = await Promise.race([addPromise, timeoutPromise]);
           console.log('[Ronda Manual] Registro guardado ID:', ref.id);
         } catch (err) {
-          console.warn('[Ronda Manual] Falló guardado online o timeout:', err);
-          console.log('[Ronda Manual] Reintentando en cola offline...');
+          console.warn('[Ronda Manual] Falló guardado online o timeout:', err.message);
           if (window.OfflineQueue) {
             await window.OfflineQueue.add({
               kind: 'ronda-manual-full',
@@ -2408,18 +2442,14 @@ document.addEventListener('DOMContentLoaded', async () => {
               data: registro,
               createdAt: Date.now()
             });
-            if (typeof UI !== 'undefined' && UI.toast) {
-              UI.toast('Guardado offline (red inestable).');
-            }
           } else {
-            throw err; // Si no hay cola, error fatal
+            throw err;
           }
         }
       }
 
     } catch (e) {
       console.error('[Ronda Manual] Error guardando:', e);
-      // No alertar aqui para no bloquear, el caller limpiara overlay
       throw e;
     }
   }

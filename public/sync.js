@@ -78,12 +78,16 @@
 
       if (!Array.isArray(tasks) || !tasks.length) {
         console.log('[sync] ✅ No hay tareas pendientes');
+        if (window.UI && UI.updateOfflineBadge) UI.updateOfflineBadge(0);
         return;
       }
 
+      // Actualizar badge inicial
+      if (window.UI && UI.updateOfflineBadge) UI.updateOfflineBadge(tasks.length);
+
       // Mostrar feedback visual
-      if (typeof UI !== 'undefined' && UI.showOverlay) {
-        UI.showOverlay('Sincronizando datos offline...', `${tasks.length} pendiente(s)`);
+      if (typeof UI !== 'undefined' && UI.updateOfflineBadge) {
+        UI.updateOfflineBadge('syncing');
       }
       console.log(`[sync] 🚀 Iniciando sincronización de ${tasks.length} tarea(s)`);
 
@@ -108,7 +112,8 @@
           t.kind === 'ronda-manual-full' ||
           t.kind === 'peatonal-full' ||
           t.kind === 'vehicular-full' ||
-          t.kind === 'incidente-full'
+          t.kind === 'incidente-full' ||
+          t.kind === 'ronda-programada-end'
         ));
 
         if (isFullDocCreation) {
@@ -121,6 +126,7 @@
             if (t.kind === 'peatonal-full') targetCollection = 'ACCESO_PEATONAL';
             else if (t.kind === 'vehicular-full') targetCollection = 'ACCESO_VEHICULAR';
             else if (t.kind === 'incidente-full') targetCollection = 'INCIDENCIAS_REGISTRADAS';
+            else if (t.kind === 'ronda-programada-end') targetCollection = 'RONDAS_COMPLETADAS';
 
             // Subir foto si viene en base64
             if (payload.foto && payload.foto.startsWith('data:')) {
@@ -151,9 +157,14 @@
             // Agregar timestamp de sincronización
             payload.sincronizadoEn = firebase.firestore.FieldValue.serverTimestamp();
 
-            // Crear documento
-            const docRef = await db.collection(targetCollection).add(payload);
-            console.log(`[sync] ✅ Documento creado en ${targetCollection}: ${docRef.id}`);
+            // Crear o Actualizar documento
+            if (t.kind === 'ronda-programada-end' && t.docId) {
+              await db.collection(targetCollection).doc(t.docId).update(payload);
+              console.log(`[sync] ✅ Ronda programada terminada: ${t.docId}`);
+            } else {
+              const docRef = await db.collection(targetCollection).add(payload);
+              console.log(`[sync] ✅ Documento creado en ${targetCollection}: ${docRef.id}`);
+            }
 
             // Remover de la cola
             await window.OfflineQueue.remove?.(id);
@@ -215,7 +226,9 @@
       console.log(`[sync] 🎉 Sincronización completada: ${syncedCount}/${tasks.length} exitosas`);
 
       if (typeof UI !== 'undefined') {
-        if (UI.hideOverlay) UI.hideOverlay();
+        if (UI.updateOfflineBadge) {
+          UI.updateOfflineBadge(syncedCount > 0 && tasks.length === syncedCount ? 'done' : 0);
+        }
         if (UI.toast && syncedCount > 0) {
           UI.toast(`✅ ${syncedCount} registro(s) sincronizado(s)`);
         }

@@ -11,7 +11,7 @@
 
 (function () {
   const DB_NAME = 'offlineQueueDB'; // conservar para compatibilidad
-  const STORE   = 'queue';
+  const STORE = 'queue';
   let db = null;
 
   // ---------- Apertura de DB (reutilizable) ----------
@@ -25,7 +25,7 @@
         }
       };
       req.onsuccess = () => res(req.result);
-      req.onerror   = () => rej(req.error || new Error('IndexedDB open error'));
+      req.onerror = () => rej(req.error || new Error('IndexedDB open error'));
     });
   }
 
@@ -48,8 +48,8 @@
         rej(e); return;
       }
       tx.oncomplete = () => res(result?.result ?? result);
-      tx.onerror    = () => rej(tx.error || new Error('IndexedDB tx error'));
-      tx.onabort    = () => rej(tx.error || new Error('IndexedDB tx aborted'));
+      tx.onerror = () => rej(tx.error || new Error('IndexedDB tx error'));
+      tx.onabort = () => rej(tx.error || new Error('IndexedDB tx aborted'));
     });
   }
 
@@ -59,9 +59,13 @@
       ...task,
       // estándar mínimo para la cola
       createdAt: task && task.createdAt ? task.createdAt : Date.now(),
-      kind     : task && task.kind ? task.kind : 'generic'
+      kind: task && task.kind ? task.kind : 'generic'
     };
-    return withStore('readwrite', (st) => st.add(payload));
+    const res = await withStore('readwrite', (st) => st.add(payload));
+    if (window.UI && UI.updateOfflineBadge) {
+      count().then(c => UI.updateOfflineBadge(c)).catch(() => { });
+    }
+    return res;
   }
 
   async function _getAllRaw() {
@@ -75,7 +79,14 @@
   }
 
   async function remove(id) {
-    return withStore('readwrite', (st) => st.delete(id));
+    const res = await withStore('readwrite', (st) => st.delete(id));
+    if (window.UI && UI.updateOfflineBadge) {
+      // Nota: Si una sincronización está en curso ('syncing'), no queremos sobrescribir 
+      // con el número N a menos que sea el final. 
+      // Pero por ahora, mostramos el número real.
+      count().then(c => UI.updateOfflineBadge(c)).catch(() => { });
+    }
+    return res;
   }
 
   async function count() {
@@ -83,7 +94,11 @@
   }
 
   async function clear() {
-    return withStore('readwrite', (st) => st.clear());
+    const res = await withStore('readwrite', (st) => st.clear());
+    if (window.UI && UI.updateOfflineBadge) {
+      UI.updateOfflineBadge(0);
+    }
+    return res;
   }
 
   // Alias legacy para compatibilidad con tu código anterior
