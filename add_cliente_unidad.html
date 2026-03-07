@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Añadir Cliente/Unidad/Puesto</title>
+  <link rel="stylesheet" href="style.css?v=75">
+  <link rel="stylesheet" href="webview.css?v=75">
+</head>
+<body style="background: none; min-height: auto;">
+  <div class="form-container" style="box-shadow: none; padding: 0.5rem; margin: 0;">
+    <form id="add-form">
+      <div class="input-group"><label for="new-cliente">Nombre del Nuevo Cliente</label><input type="text" id="new-cliente" required></div>
+      <div class="input-group"><label for="new-unidad">Nombre de la Nueva Unidad</label><input type="text" id="new-unidad" required></div>
+      <div class="input-group"><label for="new-puesto">Nombre del Nuevo Puesto</label><input type="text" id="new-puesto" required></div>
+      <button type="submit" id="guardar-btn" class="btn-primary">Guardar</button>
+    </form>
+    <p id="success-message" style="color: #30d158; text-align: center; margin-top: 1rem; display: none;">¡Guardado con éxito!</p>
+  </div>
+
+  <script src="https://www.gstatic.com/firebasejs/10.9.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.9.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.9.0/firebase-firestore-compat.js"></script>
+  <script src="firebase-config.js?v=75"></script>
+  <script src="sync.js?v=75"></script>
+  <script src="initFirebase.js?v=75"></script>
+  <script>
+    const db = firebase.firestore();
+    const addForm = document.getElementById('add-form');
+    const successMessage = document.getElementById('success-message');
+
+    addForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const cliente = document.getElementById('new-cliente').value.trim().toUpperCase();
+      const unidad  = document.getElementById('new-unidad').value.trim().toUpperCase();
+      const puesto  = document.getElementById('new-puesto').value.trim().toUpperCase();
+      if (!cliente || !unidad || !puesto) return;
+
+      const guardarBtn = document.getElementById('guardar-btn');
+      guardarBtn.disabled = true; guardarBtn.textContent = 'Guardando...';
+
+      try {
+        // Estructura B: CLIENTE_UNIDAD/{cliente}/UNIDADES/{unidad}/PUESTOS/{puesto}
+        const clienteRef = db.collection('CLIENTE_UNIDAD').doc(cliente);
+        const unidadRef = clienteRef.collection('UNIDADES').doc(unidad);
+        const puestoRef = unidadRef.collection('PUESTOS').doc(puesto);
+        
+        await db.runTransaction(async (transaction) => {
+          // Crear cliente si no existe
+          const clienteDoc = await transaction.get(clienteRef);
+          if (!clienteDoc.exists) {
+            transaction.set(clienteRef, { createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+          }
+          
+          // Crear unidad si no existe
+          const unidadDoc = await transaction.get(unidadRef);
+          if (!unidadDoc.exists) {
+            transaction.set(unidadRef, { createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+          }
+          
+          // Crear puesto si no existe
+          const puestoDoc = await transaction.get(puestoRef);
+          if (!puestoDoc.exists) {
+            transaction.set(puestoRef, { createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+          }
+        });
+        successMessage.style.display = 'block';
+        addForm.reset();
+        window.parent.postMessage('clienteAgregado', location.origin);
+        setTimeout(() => successMessage.style.display = 'none', 3000);
+      } catch (error) {
+        console.error('Error al guardar:', error);
+        alert('Ocurrió un error al guardar.');
+      } finally {
+        guardarBtn.disabled = false; guardarBtn.textContent = 'Guardar';
+      }
+    });
+  </script>
+  <script src="webview.js?v=75"></script>
+</body>
+</html>

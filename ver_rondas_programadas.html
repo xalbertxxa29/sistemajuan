@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="dark">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ver Rondas Programadas</title>
+    <link rel="stylesheet" href="style.css?v=75" />
+    <link rel="stylesheet" href="webview.css?v=75" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.2.0/css/all.min.css">
+    <style>
+        /* Custom tweaks if needed */
+        body {
+            margin: 0;
+            padding: 0;
+            overflow-x: hidden;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="list-page-container">
+        <div class="list-page-header">
+            <h2 class="page-title" style="margin:0; text-align:left;">Rondas Programadas</h2>
+            <button class="btn-back" onclick="window.location.href='menu.html'">
+                <i class="fas fa-arrow-left"></i> Volver
+            </button>
+        </div>
+
+        <div class="filters-container">
+            <input type="date" id="filter-date" class="date-input" placeholder="Filtrar por fecha">
+            <button id="btn-search" class="btn-primary" style="width:auto; padding: .65rem 1rem;">
+                <i class="fas fa-search"></i> Buscar
+            </button>
+            <button id="btn-clear" class="btn-secondary" style="width:auto; padding: .65rem 1rem;">
+                <i class="fas fa-times"></i> Limpiar
+            </button>
+            <button id="btnGeneralReport" class="btn-primary"
+                style="width:auto; padding: .65rem 1rem; background-color: #27ae60;">
+                <i class="fas fa-file-pdf"></i> Reporte General
+            </button>
+        </div>
+
+        <div id="results-list" class="list">
+            <div class="info-msg muted" style="text-align:center; margin-top:2rem;">Cargando registros...</div>
+        </div>
+
+        <div id="load-more-container" class="pagination-controls" style="display: none;">
+            <button id="btn-load-more" class="btn-secondary">Cargar más</button>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://www.gstatic.com/firebasejs/10.9.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.9.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.9.0/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.9.0/firebase-storage-compat.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+    <script src="report-service.js?v=79"></script>
+    <script src="firebase-config.js?v=75"></script>
+    <script src="ver_rondas_programadas.js?v=75"></script>
+</body>
+
+</html>
