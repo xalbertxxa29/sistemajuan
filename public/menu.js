@@ -119,20 +119,23 @@ document.addEventListener("DOMContentLoaded", () => {
         // Actualizar UI con su nombre y unidad
         const nameEl = $("#user-details");
         const unitEl = $("#user-client-unit");
-        const fullname = `${userData.NOMBRES || userData.nombres || ''} ${userData.APELLIDOS || userData.apellidos || ''}`.trim();
+        const userDataRaw = userData || {};
+        const nom = userDataRaw.NOMBRES || userDataRaw.nombres || '';
+        const ape = userDataRaw.APELLIDOS || userDataRaw.apellidos || '';
+        const fullname = `${nom} ${ape}`.trim();
         nameEl.textContent = fullname || userId;
-        unitEl.textContent = `${userData.CLIENTE || userData.cliente || ''} - ${userData.UNIDAD || userData.unidad || ''} - ${userData.PUESTO || userData.puesto || ''}`;
+        unitEl.textContent = `${userDataRaw.CLIENTE || userDataRaw.cliente || ''} - ${userDataRaw.UNIDAD || userDataRaw.unidad || ''} - ${userDataRaw.PUESTO || userDataRaw.puesto || ''}`;
 
         // 💾 5. GUARDAR / REFRESCAR CACHE LOCAL DEL PERFIL
         if (typeof offlineStorage !== 'undefined') {
           await offlineStorage.setUserData({
             email: user.email,
             userId: userId,
-            nombres: userData.NOMBRES || '',
-            apellidos: userData.APELLIDOS || '',
-            cliente: userData.CLIENTE,
-            unidad: userData.UNIDAD,
-            puesto: userData.PUESTO || ''
+            nombres: nom,
+            apellidos: ape,
+            cliente: userDataRaw.CLIENTE || userDataRaw.cliente || '',
+            unidad: userDataRaw.UNIDAD || userDataRaw.unidad || '',
+            puesto: userDataRaw.PUESTO || userDataRaw.puesto || ''
           }).catch(e => console.warn('[menu] Error refrescando caché offline:', e));
         }
 
