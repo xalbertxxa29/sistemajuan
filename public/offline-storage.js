@@ -9,7 +9,8 @@ class OfflineStorage {
     this.DB_NAME = 'ronda-app-data';
     this.STORES = {
       user: 'user-profile',
-      globals: 'app-globals'
+      globals: 'app-globals',
+      config: 'config-cache'
     };
     this.init();
   }
@@ -38,6 +39,10 @@ class OfflineStorage {
         if (!db.objectStoreNames.contains(this.STORES.globals)) {
           db.createObjectStore(this.STORES.globals, { keyPath: 'key' });
           console.log('✓ Store "app-globals" creado');
+        }
+        if (!db.objectStoreNames.contains(this.STORES.config)) {
+          db.createObjectStore(this.STORES.config, { keyPath: 'key' });
+          console.log('✓ Store "config-cache" creado');
         }
       };
 
@@ -151,6 +156,50 @@ class OfflineStorage {
       });
     } catch (e) {
       console.error(`Error obteniendo global data (${key}):`, e?.message);
+      return null;
+    }
+  }
+
+  // --- NUEVOS MÉTODOS PARA CONFIGURACIÓN (CATÁLOGOS) ---
+
+  /**
+   * Guarda un catálogo completo bajo una llave (ej: 'tipo-incidencias', 'qrs')
+   */
+  async saveConfig(key, data) {
+    try {
+      const db = await this.openDB();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(this.STORES.config, 'readwrite');
+        const store = tx.objectStore(this.STORES.config);
+        const request = store.put({
+          key: key,
+          data: data,
+          updatedAt: new Date().toISOString()
+        });
+        request.onsuccess = () => resolve(true);
+        request.onerror = () => reject(request.error);
+      });
+    } catch (e) {
+      console.error(`[OfflineStorage] Error guardando config ${key}:`, e);
+      return false;
+    }
+  }
+
+  /**
+   * Recupera un catálogo de la base de datos local
+   */
+  async getConfig(key) {
+    try {
+      const db = await this.openDB();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(this.STORES.config, 'readonly');
+        const store = tx.objectStore(this.STORES.config);
+        const request = store.get(key);
+        request.onsuccess = () => resolve(request.result ? request.result.data : null);
+        request.onerror = () => reject(request.error);
+      });
+    } catch (e) {
+      console.error(`[OfflineStorage] Error obteniendo config ${key}:`, e);
       return null;
     }
   }

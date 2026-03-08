@@ -169,6 +169,24 @@ document.addEventListener("DOMContentLoaded", () => {
           console.warn('[menu] ⚠️ iniciarControlTiempo no disponible en window');
         }
 
+        // 🔄 8. SINCRONIZACIÓN GLOBAL INCREMENTAL (NUEVA ARQUITECTURA)
+        if (window.SyncEngine) {
+          console.log('[menu] 🚀 Iniciando Sincronización Global Bloqueante...');
+          if (typeof UI !== 'undefined' && UI.showOverlay) {
+            UI.showOverlay('Sincronizando información... por favor espere.');
+          }
+
+          try {
+            // Await asegura que la sincronización termine antes de quitar el overlay
+            await window.SyncEngine.syncAll(userData);
+            console.log('[menu] ✅ Sincronización Global Inicial completada');
+          } catch (err) {
+            console.error('[menu] Error en Sincronización Global:', err);
+          } finally {
+            if (typeof UI !== 'undefined' && UI.hideOverlay) UI.hideOverlay();
+          }
+        }
+
       } catch (err) {
         console.error("[menu] Error crítico en auth callback:", err);
         if (typeof UI !== 'undefined' && UI.hideOverlay) UI.hideOverlay();

@@ -210,6 +210,17 @@ document.addEventListener('DOMContentLoaded', () => {
         UX.show('Cargando historial vehicular…');
 
         try {
+            // 1. Intentar Carga desde Cache
+            if (!direction && window.offlineStorage) {
+                const cached = await window.offlineStorage.getConfig('vehicular-hoy');
+                if (cached && cached.length > 0) {
+                    console.log('[ver_vehicular] Cargando desde cache local (HOY).');
+                    allLoadedData = cached;
+                    renderData(cached);
+                    if (!navigator.onLine) { UX.hide(); return; }
+                }
+            }
+
             let cursor = null;
             if (direction === 'next') cursor = lastDoc;
             if (direction === 'prev') {
@@ -224,7 +235,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const snap = await buildQuery(direction, cursor).get();
 
             if (snap.empty) {
-                render([]);
+                if (allLoadedData.length === 0) renderData([]);
                 prevBtn.disabled = pageStack.length <= 1;
                 nextBtn.disabled = true;
                 UX.hide();
@@ -236,9 +247,11 @@ document.addEventListener('DOMContentLoaded', () => {
             lastDoc = last;
             if (direction !== 'prev') pageStack.push(first);
 
-            snap.docs.forEach(d => allLoadedData.push(d.data()));
+            const fetchedData = snap.docs.map(d => d.data());
+            if (!direction) allLoadedData = fetchedData;
+            else snap.docs.forEach(d => allLoadedData.push(d.data()));
 
-            render(snap.docs);
+            renderData(fetchedData);
 
             prevBtn.disabled = pageStack.length <= 1;
             nextBtn.disabled = snap.docs.length < PAGE_SIZE;
@@ -255,6 +268,33 @@ document.addEventListener('DOMContentLoaded', () => {
         } finally {
             UX.hide();
         }
+    }
+
+    function renderData(dataList) {
+        cont.innerHTML = '';
+        if (!dataList || !dataList.length) {
+            cont.innerHTML = `<p class="muted">Sin registros vehiculares.</p>`;
+            return;
+        }
+        dataList.forEach(data => {
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = cardVehicularHTML(data);
+            const article = tempDiv.firstElementChild;
+
+            const btnContainer = document.createElement('div');
+            btnContainer.style.cssText = "margin-top:10px; border-top:1px solid #444; padding-top:8px; text-align:right;";
+            btnContainer.innerHTML = `
+              <button class="btn-report" style="background:transparent; border:1px solid #666; color:#ccc; border-radius:4px; padding:5px 10px; cursor:pointer;">
+                  <i class="fas fa-file-pdf" style="color:#e74c3c;"></i> Descargar Reporte
+              </button>
+            `;
+            btnContainer.querySelector('button').addEventListener('click', (e) => {
+                e.stopPropagation();
+                ReportService.generateAndUpload(data, 'VEHICULAR', 'vehicular');
+            });
+            article.appendChild(btnContainer);
+            cont.appendChild(article);
+        });
     }
 
     // ---------- Eventos ----------

@@ -127,10 +127,17 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       UX.show('Cargando consignas…');
       const userId = user.email.split('@')[0];
+
+      // 1. Obtener perfil (Priorizar local)
       let userData = null;
-      if (window.getUserProfile) {
-        userData = await window.getUserProfile(userId);
-      } else {
+      if (window.offlineStorage) {
+        userData = await window.offlineStorage.getUserData();
+      }
+
+      if (!userData && !navigator.onLine) throw new Error('No hay conexión ni datos locales.');
+
+      // Fallback a Firestore si no hay local o forzamos refresco
+      if (!userData) {
         const prof = await db.collection('USUARIOS').doc(userId).get();
         if (prof.exists) userData = prof.data();
       }
@@ -138,13 +145,14 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!userData) throw new Error('No se encontró el perfil del usuario.');
 
       const { CLIENTE, UNIDAD } = userData;
-      const query = (col) => db.collection(col).where('cliente', '==', CLIENTE).where('unidad', '==', UNIDAD).get();
 
-      const [permsSnap, tempsSnap] = await Promise.all([query('CONSIGNA_PERMANENTE'), query('CONSIGNA_TEMPORAL')]);
+      // 2. Intentar cargar desde el nuevo Cache Global (SyncEngine)
+      let all = [];
+      if (window.offlineStorage) {
+        const cachedPerm = await window.offlineStorage.getConfig('consignas-perm') || [];
+        const cachedTemp = await window.offlineStorage.getConfig('consignas-temp') || [];
 
-      const permanentes = permsSnap.docs.map(d => {
-        const x = d.data();
-        return {
+        const permanentes = cachedPerm.map(x => ({
           tipo: 'PERMANENTE',
           titulo: x.titulo || 'Consigna',
           descripcion: x.descripcion || '',
@@ -152,32 +160,76 @@ document.addEventListener('DOMContentLoaded', () => {
           registradoPor: x.registradoPor || 'S/N',
           puesto: x.puesto || null,
           fotoURL: x.fotoURL || x.fotoEmbedded || null,
-        };
-      });
-
-      const temporales = tempsSnap.docs.map(d => d.data())
-        .filter(isTemporalActiva)
-        .map(x => ({
-          tipo: 'TEMPORAL',
-          titulo: x.titulo || 'Consigna',
-          descripcion: x.descripcion || '',
-          timestamp: x.timestamp || null,
-          inicio: x.inicio || null,
-          fin: x.fin || null,
-          registradoPor: x.registradoPor || 'S/N',
-          puesto: x.puesto || null,
-          fotoURL: x.fotoURL || x.fotoEmbedded || null,
         }));
 
-      const all = [...permanentes, ...temporales].sort((a, b) => getMillis(b.timestamp) - getMillis(a.timestamp));
+        const temporales = cachedTemp
+          .filter(isTemporalActiva)
+          .map(x => ({
+            tipo: 'TEMPORAL',
+            titulo: x.titulo || 'Consigna',
+            descripcion: x.descripcion || '',
+            timestamp: x.timestamp || null,
+            inicio: x.inicio || null,
+            fin: x.fin || null,
+            registradoPor: x.registradoPor || 'S/N',
+            puesto: x.puesto || null,
+            fotoURL: x.fotoURL || x.fotoEmbedded || null,
+          }));
+
+        all = [...permanentes, ...temporales].sort((a, b) => getMillis(b.timestamp) - getMillis(a.timestamp));
+
+        if (all.length > 0) {
+          console.log('[ver_consignas] Cargando desde cache local.');
+          renderList(all);
+          UX.hide();
+
+          // Si estamos online, podemos refrescar silenciosamente en el fondo si el usuario quiere,
+          // pero por ahora confiamos en el SyncEngine al inicio.
+          if (!navigator.onLine) return;
+        }
+      }
+
+      // 3. Fallback a Firestore (Solo si no hay cache o falló)
+      if (all.length === 0 && navigator.onLine) {
+        const query = (col) => db.collection(col).where('cliente', '==', CLIENTE).where('unidad', '==', UNIDAD).get();
+        const [permsSnap, tempsSnap] = await Promise.all([query('CONSIGNA_PERMANENTE'), query('CONSIGNA_TEMPORAL')]);
+
+        const permanentes = permsSnap.docs.map(d => {
+          const x = d.data();
+          return {
+            tipo: 'PERMANENTE',
+            titulo: x.titulo || 'Consigna',
+            descripcion: x.descripcion || '',
+            timestamp: x.timestamp || null,
+            registradoPor: x.registradoPor || 'S/N',
+            puesto: x.puesto || null,
+            fotoURL: x.fotoURL || x.fotoEmbedded || null,
+          };
+        });
+
+        const temporales = tempsSnap.docs.map(d => d.data())
+          .filter(isTemporalActiva)
+          .map(x => ({
+            tipo: 'TEMPORAL',
+            titulo: x.titulo || 'Consigna',
+            descripcion: x.descripcion || '',
+            timestamp: x.timestamp || null,
+            inicio: x.inicio || null,
+            fin: x.fin || null,
+            registradoPor: x.registradoPor || 'S/N',
+            puesto: x.puesto || null,
+            fotoURL: x.fotoURL || x.fotoEmbedded || null,
+          }));
+
+        all = [...permanentes, ...temporales].sort((a, b) => getMillis(b.timestamp) - getMillis(a.timestamp));
+        renderList(all);
+      }
 
       // Listener Reporte General
       const btnGeneral = document.getElementById('btnGeneralReport');
       if (btnGeneral) {
-        // Remover listener previo para evitar duplicados si se llama varias veces (aunque load es onAuth)
         const newBtn = btnGeneral.cloneNode(true);
         btnGeneral.parentNode.replaceChild(newBtn, btnGeneral);
-
         newBtn.addEventListener('click', () => {
           if (!all.length) {
             UX.alert('Aviso', 'No hay consignas para reportar.');
@@ -186,8 +238,6 @@ document.addEventListener('DOMContentLoaded', () => {
           ReportService.generateGeneralListReport(all, 'CONSIGNA', 'REPORTE GENERAL DE CONSIGNAS');
         });
       }
-
-      renderList(all);
 
     } catch (err) {
       console.error(err);

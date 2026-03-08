@@ -209,33 +209,48 @@ document.addEventListener('DOMContentLoaded', () => {
     if (tipoIncidenteSelect) tipoIncidenteSelect.innerHTML = '<option value="" disabled selected>Cargando...</option>';
     try {
       const { CLIENTE, UNIDAD } = currentUserProfile;
+
+      // 1. INTENTAR CACHÉ PRIMERO (SyncEngine)
+      if (window.offlineStorage) {
+        const cachedTypes = await offlineStorage.getConfig('incident-types');
+        if (cachedTypes && cachedTypes.length > 0) {
+          console.log('[Incidente] Cargando tipos desde caché local.');
+          renderizarTipos(cachedTypes, tipoSeleccionado);
+          return;
+        }
+      }
+
+      // 2. FALLBACK A RED SI NO HAY CACHÉ
       const path = `/TIPO_INCIDENCIAS/${CLIENTE}/UNIDADES/${UNIDAD}/TIPO`;
       const snapshot = await db.collection(path).get();
 
       if (snapshot.empty) {
         if (tipoIncidenteSelect) tipoIncidenteSelect.innerHTML = '<option value="" disabled>No hay tipos definidos</option>';
-        if (detalleIncidenteSelect) {
-          detalleIncidenteSelect.innerHTML = '<option value="" disabled>Seleccione un tipo primero</option>';
-          detalleIncidenteSelect.disabled = true;
-        }
         return;
       }
 
-      if (tipoIncidenteSelect) {
-        tipoIncidenteSelect.innerHTML = '<option value="" disabled selected>Seleccione un tipo</option>';
-        snapshot.forEach(doc => {
-          const op = document.createElement('option');
-          op.value = doc.id; op.textContent = doc.id;
-          if (doc.id === tipoSeleccionado) op.selected = true;
-          tipoIncidenteSelect.appendChild(op);
-        });
-        tipoIncidenteSelect.disabled = false;
-        if (tipoSeleccionado) tipoIncidenteSelect.dispatchEvent(new Event('change'));
-      }
+      const typesFromNet = [];
+      snapshot.forEach(doc => typesFromNet.push({ id: doc.id, ...doc.data() }));
+      renderizarTipos(typesFromNet, tipoSeleccionado);
+
     } catch (e) {
       console.error('Error cargando tipos:', e);
       if (tipoIncidenteSelect) tipoIncidenteSelect.innerHTML = '<option value="">Error al cargar</option>';
     }
+  }
+
+  function renderizarTipos(types, seleccionado) {
+    if (!tipoIncidenteSelect) return;
+    tipoIncidenteSelect.innerHTML = '<option value="" disabled selected>Seleccione un tipo</option>';
+    types.forEach(t => {
+      const op = document.createElement('option');
+      op.value = t.id;
+      op.textContent = t.id;
+      if (t.id === seleccionado) op.selected = true;
+      tipoIncidenteSelect.appendChild(op);
+    });
+    tipoIncidenteSelect.disabled = false;
+    if (seleccionado) tipoIncidenteSelect.dispatchEvent(new Event('change'));
   }
 
   async function cargarDetallesIncidente(tipoId) {
@@ -246,6 +261,19 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     try {
       const { CLIENTE, UNIDAD } = currentUserProfile;
+
+      // 1. INTENTAR CACHÉ PRIMERO
+      if (window.offlineStorage) {
+        const cachedTypes = await offlineStorage.getConfig('incident-types');
+        const tipoEncontrado = cachedTypes ? cachedTypes.find(t => t.id === tipoId) : null;
+        if (tipoEncontrado) {
+          console.log('[Incidente] Cargando detalles desde caché local.');
+          renderizarDetalles(tipoEncontrado.DETALLES || tipoEncontrado.detalles || tipoEncontrado);
+          return;
+        }
+      }
+
+      // 2. FALLBACK A RED
       const path = `/TIPO_INCIDENCIAS/${CLIENTE}/UNIDADES/${UNIDAD}/TIPO`;
       const doc = await db.collection(path).doc(tipoId).get();
 
@@ -253,35 +281,38 @@ document.addEventListener('DOMContentLoaded', () => {
         if (detalleIncidenteSelect) detalleIncidenteSelect.innerHTML = '<option value="" disabled>No hay detalles</option>';
         return;
       }
+      renderizarDetalles(doc.data());
 
-      const data = doc.data() || {};
-      // Puede venir como array, objeto {DETALLES: [...]}, o llaves sueltas
-      let detalles = [];
-      if (Array.isArray(data.DETALLES)) detalles = data.DETALLES.slice();
-      else if (Array.isArray(data.detalles)) detalles = data.detalles.slice();
-      else if (data.DETALLES && typeof data.DETALLES === 'object') detalles = Object.values(data.DETALLES);
-      else if (data && typeof data === 'object') {
-        const vals = Object.values(data).filter(v => typeof v === 'string');
-        if (vals.length) detalles = vals;
-      }
-      detalles = [...new Set(detalles)].sort();
-
-      if (detalleIncidenteSelect) {
-        detalleIncidenteSelect.innerHTML = detalles.length
-          ? '<option value="" disabled selected>Seleccione un detalle</option>'
-          : '<option value="" disabled>No hay detalles</option>';
-        detalles.forEach(det => {
-          const op = document.createElement('option');
-          op.value = det; op.textContent = det;
-          detalleIncidenteSelect.appendChild(op);
-        });
-        detalleIncidenteSelect.disabled = detalles.length === 0;
-      }
     } catch (error) {
       console.error('Error cargando detalles:', error);
       if (detalleIncidenteSelect) detalleIncidenteSelect.innerHTML = '<option value="">Error</option>';
     }
   }
+
+  function renderizarDetalles(data) {
+    if (!detalleIncidenteSelect) return;
+    let detalles = [];
+    if (Array.isArray(data)) detalles = data.slice();
+    else if (Array.isArray(data.DETALLES)) detalles = data.DETALLES.slice();
+    else if (Array.isArray(data.detalles)) detalles = data.detalles.slice();
+    else if (data.DETALLES && typeof data.DETALLES === 'object') detalles = Object.values(data.DETALLES);
+    else if (data && typeof data === 'object') {
+      const vals = Object.values(data).filter(v => typeof v === 'string' && v !== data.id);
+      if (vals.length) detalles = vals;
+    }
+    detalles = [...new Set(detalles)].sort();
+
+    detalleIncidenteSelect.innerHTML = detalles.length
+      ? '<option value="" disabled selected>Seleccione un detalle</option>'
+      : '<option value="" disabled>No hay detalles</option>';
+    detalles.forEach(det => {
+      const op = document.createElement('option');
+      op.value = det; op.textContent = det;
+      detalleIncidenteSelect.appendChild(op);
+    });
+    detalleIncidenteSelect.disabled = detalles.length === 0;
+  }
+
   tipoIncidenteSelect?.addEventListener('change', (e) => cargarDetallesIncidente(e.target.value));
 
   // --- Guardado desde el modal ---

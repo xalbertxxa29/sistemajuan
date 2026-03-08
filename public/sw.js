@@ -27,7 +27,6 @@ const PRECACHE_URLS = [
   './offline-storage.js',
   './offline-queue.js',
   './sync.js',
-  './monitor-sync.js',
   './offline-sync.js',
   './ronda-sync.js',
   './report-service.js',

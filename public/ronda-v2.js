@@ -286,7 +286,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       if (userCtx.cliente && userCtx.unidad) {
         tareasParalelas.push(cargarRondas());       // Tarda si está online, usa caché si offline
-        tareasParalelas.push(cachearQRsDelSitio()); // Offline QRs
       } else {
         console.warn("[Ronda] No hay Cliente/Unidad validos para cargar rondas.");
       }
@@ -328,37 +327,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
-  // ===================== CACHEAR QRS (OFFLINE) =====================
-  async function cachearQRsDelSitio() {
-    if (!navigator.onLine) {
-      console.log('[Ronda] Offline: No se pueden actualizar QRs, usando cache existente.');
-      return;
-    }
-
-    try {
-      console.log(`[Ronda] Descargando QRs para ${userCtx.cliente} - ${userCtx.unidad}...`);
-
-      // OPTIMIZACIÓN: Filtro de servidor para ahorrar lectura y ancho de banda
-      const snapshot = await db.collection('QR_CODES')
-        .where('cliente', '==', userCtx.cliente)
-        .where('unidad', '==', userCtx.unidad)
-        .get();
-
-      const listaQRs = [];
-      snapshot.forEach(doc => {
-        listaQRs.push(doc.data());
-      });
-
-      if (listaQRs.length > 0) {
-        await RONDA_STORAGE.guardarQRsEnCache(listaQRs);
-        console.log(`[Ronda] ✓ Se cachearon ${listaQRs.length} QRs válidos.`);
-      } else {
-        console.warn('[Ronda] No se encontraron QRs para este sitio en el servidor.');
-      }
-    } catch (e) {
-      console.warn('[Ronda] Error cacheando QRs:', e);
-    }
-  }
 
   // ===================== VERIFICAR RONDA EN PROGRESO =====================
   async function verificarRondaEnProgreso(userEmail) {
@@ -2530,71 +2498,80 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  // ===================== SINCRONIZAR DATOS (CACHE) =====================
-  async function sincronizarDatos() {
+  // ===================== CARGAR CONFIGURACIÓN RONDAS (CACHE-FIRST) =====================
+  async function cargarConfiguracionRonda() {
+    try {
+      const user = await window.getUserProfile(auth.currentUser?.email.split('@')[0]);
+      if (!user) return;
+
+      // 1. INTENTAR CACHÉ INCREMENTAL (SyncEngine)
+      if (window.offlineStorage) {
+        const cachedQrs = await offlineStorage.getConfig('qrs');
+        if (cachedQrs && cachedQrs.length > 0) {
+          console.log('[Ronda] Cargando QRs desde caché incremental.');
+          puntosRonda = cachedQrs;
+          renderizarPuntosControl();
+          return;
+        }
+      }
+
+      // 2. FALLBACK A RED / CACHÉ FIRESTORE
+      const snap = await db.collection('QR_CODES').get();
+      puntosRonda = [];
+      snap.forEach(doc => {
+        const d = doc.data();
+        const dCli = (d.cliente || d.CLIENTE || '').toUpperCase();
+        const dUni = (d.unidad || d.UNIDAD || '').toUpperCase();
+        const uCli = (user.cliente || user.CLIENTE || '').toUpperCase();
+        const uUni = (user.unidad || user.UNIDAD || '').toUpperCase();
+
+        if (dCli === uCli && dUni === uUni) {
+          puntosRonda.push({ id: doc.id, ...d });
+        }
+      });
+      mostrarRondaEnProgreso();
+    } catch (e) {
+      console.error('Error cargando configuración:', e);
+    }
+  }
+
+  // ===================== SINCRONIZAR DATOS (COORDINADO CON SYNCENGINE) =====================
+  async function sincronizarDatos(isSilent = false) {
     if (!navigator.onLine) {
-      if (UI && UI.alert) UI.alert('Sin Conexión', 'Necesitas internet para descargar los datos.');
-      else alert('Necesitas internet para descargar los datos.');
+      if (!isSilent) {
+        if (UI && UI.alert) UI.alert('Sin Conexión', 'Necesitas internet para descargar los datos.');
+        else alert('Necesitas internet para descargar los datos.');
+      }
       return;
     }
 
-    const overlay = mostrarOverlay('Descargando datos para modo offline...');
+    let overlay = null;
+    if (!isSilent) overlay = mostrarOverlay('Sincronizando configuración global...');
+
     try {
-      // 1. Descargar QRs del Cliente/Unidad
-      console.log('[Sync] Descargando QRs...');
-      const snapshot = await db.collection('QR_CODES').get();
-      const qrsParaCache = [];
+      const user = await window.getUserProfile(auth.currentUser?.email.split('@')[0]);
+      if (window.SyncEngine && user) {
+        // Usar el nuevo motor centralizado
+        await window.SyncEngine.syncAll(user, isSilent ? false : true); // false en syncAll significa 'no forzar'
+        await cargarConfiguracionRonda(); // Recargar UI
+      }
 
-      snapshot.forEach(doc => {
-        const d = doc.data();
-        if ((d.cliente || '').toUpperCase() === userCtx.cliente &&
-          (d.unidad || '').toUpperCase() === userCtx.unidad) {
-          qrsParaCache.push(d);
+      if (overlay) ocultarOverlay();
+
+      if (!isSilent) {
+        if (UI && UI.alert) {
+          UI.alert('Sincronización Exitosa', `Configuración global y puntos de ronda actualizados.\nYa puedes usar la app sin internet.`);
+        } else {
+          alert(`✅ Sincronización Exitosa.\nConfiguración global y puntos de ronda actualizados.\nYa puedes usar la app sin internet.`);
         }
-      });
-
-      // Guardar en RONDA_STORAGE (usando una key especial o extendiendo la clase)
-      // RONDA_STORAGE.guardarQRsEnCache no existe aun, vamos a usar guardarEnCache genérico o hackearlo.
-      // Mejor: actualizamos offline-storage.js o usamos RONDA_STORAGE si tiene metodo.
-      // Revisando RONDA_STORAGE... tiene 'obtenerQRsDeCache'. Necesita 'guardarQRsEnCache'.
-
-      if (RONDA_STORAGE.guardarQRsEnCache) {
-        await RONDA_STORAGE.guardarQRsEnCache(qrsParaCache);
-      } else {
-        // Fallback si no existe el método (lo agregaremos a offline-storage.js o similar si es ahi donde vive)
-        // Asumimos que RONDA_STORAGE es la clase de ronda-sync.js? No, es de offline-storage.js?
-        // Ah, RONDA_STORAGE es una variable global instanciada donde?
-        // En ronda-v2.js no la veo instanciada, debe ser global.
-        // Voy a asumir que podemos llamar a un metodo nuevo que creare, o usarlo directo si es IDB.
-        // Por seguridad, agregare el metodo a RONDA_STORAGE en el siguiente paso si falla.
-        // PERO por ahora, intentemos usar lo que hay.
-      }
-
-      // 2. Descargar Perfil Usuario
-      console.log('[Sync] Descargando Perfil...');
-      if (window.offlineStorage) {
-        try {
-          const doc = await db.collection('USUARIOS').doc(userCtx.userId).get();
-          if (doc.exists) {
-            await window.offlineStorage.setUserData({
-              id: userCtx.userId,
-              ...doc.data()
-            });
-          }
-        } catch (e) { console.warn(e); }
-      }
-
-      ocultarOverlay();
-      if (UI && UI.alert) {
-        UI.alert('Sincronización Exitosa', `Datos sincronizados correctamente.\n\n${qrsParaCache.length} puntos descargados.\nYa puedes usar la app sin internet.`);
-      } else {
-        alert(`✅ Datos sincronizados.\n\n${qrsParaCache.length} puntos descargados.\nYa puedes usar la app sin internet.`);
       }
     } catch (e) {
       console.error('[Sync] Error:', e);
-      ocultarOverlay();
-      if (UI && UI.alert) UI.alert('Error de Sincronización', 'No se pudieron descargar los datos: ' + e.message);
-      else alert('Error sincronizando: ' + e.message);
+      if (overlay) ocultarOverlay();
+      if (!isSilent) {
+        if (UI && UI.alert) UI.alert('Error de Sincronización', 'No se pudieron descargar los datos: ' + e.message);
+        else alert('Error sincronizando: ' + e.message);
+      }
     }
   }
 
