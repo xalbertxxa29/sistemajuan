@@ -1,4 +1,4 @@
-// salidavehicular.js (v69) - Salida Vehicular
+// salidavehicular.js (v70) - Salida Vehicular con Cache-First
 // Patrón idéntico a peatonal.js para consistencia
 document.addEventListener('DOMContentLoaded', () => {
   // Firebase ya debe estar inicializado por initFirebase.js
@@ -45,7 +45,7 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       const userId = user.email.split('@')[0];
       const snap = await db.collection('USUARIOS').doc(userId).get();
-      
+
       if (snap.exists) {
         const datos = snap.data();
         userCtx.cliente = datos.CLIENTE || datos.cliente || '';
@@ -53,9 +53,9 @@ document.addEventListener('DOMContentLoaded', () => {
         userCtx.puesto = datos.PUESTO || datos.puesto || '';
         // v73: Guardar nombre completo
         userCtx.nombreCompleto = `${datos.NOMBRES || ''} ${datos.APELLIDOS || ''}`.trim().toUpperCase();
-        
+
         console.log('✓ Datos del usuario obtenidos de Firestore', userCtx);
-        
+
         // Guardar en offline storage para próxima vez
         if (window.OfflineStorage && userCtx.cliente && userCtx.unidad) {
           try {
@@ -72,7 +72,7 @@ document.addEventListener('DOMContentLoaded', () => {
             console.warn('No se pudo guardar en OfflineStorage:', e.message);
           }
         }
-        
+
         cargarVehiculos();
       } else {
         console.warn('Perfil de usuario no encontrado en Firestore');
@@ -87,7 +87,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Cargar vehículos
   async function cargarVehiculos() {
     console.log('🚗 Iniciando carga de vehículos con:', userCtx);
-    
+
     if (!userCtx.cliente || !userCtx.unidad || !userCtx.puesto) {
       const listDiv = document.getElementById('vehiculos-list');
       const msg = `Faltan datos: cliente=${userCtx.cliente}, unidad=${userCtx.unidad}, puesto=${userCtx.puesto}`;
@@ -100,21 +100,27 @@ document.addEventListener('DOMContentLoaded', () => {
     listDiv.innerHTML = '<p style="text-align:center; padding:20px;">Cargando...</p>';
 
     try {
+      // --- NUEVO: Estrategia Cache-First para "Cache Everything" ---
+      if (window.offlineStorage) {
+        const cached = await window.offlineStorage.getConfig('vehiculos-dentro');
+        if (cached && Array.isArray(cached) && cached.length > 0) {
+          console.log('[salidavehicular] 📦 Usando datos de caché (vehiculos-dentro)');
+          renderVehiculos(cached);
+          // Si estamos online, seguimos para refrescar, pero el usuario ya ve data
+          if (!navigator.onLine) {
+            if (UI?.hideOverlay) UI.hideOverlay();
+            return;
+          }
+        }
+      }
+
       const query = db.collection('ACCESO_VEHICULAR')
         .where('cliente', '==', userCtx.cliente)
         .where('unidad', '==', userCtx.unidad)
         .where('puesto', '==', userCtx.puesto)
         .where('estado', '==', 'ingreso');
 
-      console.log('📋 Ejecutando query con filtros:', {
-        cliente: userCtx.cliente,
-        unidad: userCtx.unidad,
-        puesto: userCtx.puesto,
-        estado: 'ingreso'
-      });
-
       const snapshot = await query.get();
-
       console.log('📊 Query result:', snapshot.size, 'documentos encontrados');
 
       if (snapshot.empty) {
@@ -122,14 +128,26 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
 
-      listDiv.innerHTML = '';
-      snapshot.forEach(doc => {
-        const data = doc.data();
-        vehiculosData[doc.id] = { docId: doc.id, ...data };
+      const docs = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+      renderVehiculos(docs);
 
-        const card = document.createElement('div');
-        card.className = 'vehiculo-card';
-        card.innerHTML = `
+    } catch (error) {
+      console.error('❌ Error cargando vehículos:', error);
+      listDiv.innerHTML = `<p style="text-align:center; color:red; padding:20px;">Error: ${error.message}</p>`;
+    }
+  }
+
+  function renderVehiculos(lista) {
+    const listDiv = document.getElementById('vehiculos-list');
+    listDiv.innerHTML = '';
+
+    lista.forEach(data => {
+      const id = data.id || data.docId;
+      vehiculosData[id] = { docId: id, ...data };
+
+      const card = document.createElement('div');
+      card.className = 'vehiculo-card';
+      card.innerHTML = `
           <div class="vehiculo-info">
             <div style="margin-bottom:10px;">
               <strong>Placa:</strong> ${data.placa || 'N/A'}
@@ -145,27 +163,20 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
             ${data.observaciones ? `<div style="margin-bottom:10px;"><strong>Observaciones:</strong> ${data.observaciones}</div>` : ''}
             <div style="margin-bottom:10px; font-size:0.9em; color:#999;">
-              Ingreso: ${new Date(data.fechaIngreso).toLocaleString('es-ES')}
+              Ingreso: ${data.fechaIngreso ? new Date(data.fechaIngreso).toLocaleString('es-ES') : '—'}
             </div>
           </div>
-          <button class="btn-dar-salida" data-doc-id="${doc.id}">
+          <button class="btn-dar-salida" data-doc-id="${id}">
             Dar Salida
           </button>
         `;
-        listDiv.appendChild(card);
-      });
+      listDiv.appendChild(card);
+    });
 
-      console.log('✓ Se cargaron', snapshot.size, 'vehículos');
-
-      // Agregar event listeners a botones
-      document.querySelectorAll('.btn-dar-salida').forEach(btn => {
-        btn.addEventListener('click', abrirModalSalida);
-      });
-
-    } catch (error) {
-      console.error('❌ Error cargando vehículos:', error);
-      listDiv.innerHTML = `<p style="text-align:center; color:red; padding:20px;">Error: ${error.message}</p>`;
-    }
+    // Agregar event listeners a botones
+    document.querySelectorAll('.btn-dar-salida').forEach(btn => {
+      btn.addEventListener('click', abrirModalSalida);
+    });
   }
 
   // Modal Salida
@@ -179,11 +190,11 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('modal-placa').textContent = vehiculo.placa || 'N/A';
     document.getElementById('modal-marca-modelo').textContent = `${vehiculo.marca || 'N/A'} ${vehiculo.modelo || 'N/A'}`;
     document.getElementById('modal-dni-nombre').textContent = `${vehiculo.dni || 'N/A'} - ${vehiculo.nombres || 'N/A'}`;
-    
+
     // Mostrar imagen si existe
     const imgElement = document.getElementById('modal-foto');
     const imgTextElement = document.getElementById('modal-foto-text');
-    
+
     if (vehiculo.fotoURL && vehiculo.fotoURL.trim()) {
       imgElement.src = vehiculo.fotoURL;
       imgElement.style.display = 'block';
@@ -199,9 +210,9 @@ document.addEventListener('DOMContentLoaded', () => {
       imgTextElement.style.display = 'block';
       imgTextElement.textContent = 'Sin foto disponible';
     }
-    
+
     document.getElementById('comentario-salida').value = '';
-    
+
     // Mostrar modal
     const modal = document.getElementById('modal-salida');
     modal.style.display = 'flex';

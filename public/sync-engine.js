@@ -16,7 +16,12 @@
             ACCESO_PEATONAL_HOY: 'peatonal-hoy',
             ACCESO_VEHICULAR_HOY: 'vehicular-hoy',
             INCIDENCIAS_HOY: 'incidencias-hoy',
-            CATALOGOS_ACCESO: 'catalogos-acceso'
+            CATALOGOS_ACCESO: 'catalogos-acceso',
+            PUESTOS: 'puestos',
+            CUADERNO_HOY: 'cuaderno-hoy',
+            VEHICULOS_DENTRO: 'vehiculos-dentro',
+            PEATONES_DENTRO: 'peatones-dentro',
+            RONDAS_DISPONIBLES: 'rondas-disponibles'
         },
 
         /**
@@ -76,7 +81,12 @@
                     peatonalHoy,
                     vehicularHoy,
                     incidenciasHoy,
-                    catalogosAcceso
+                    catalogosAcceso,
+                    puestos,
+                    cuadernoHoy,
+                    vehiculosDentro,
+                    peatonesDentro,
+                    rondasDisponibles
                 ] = await Promise.all([
                     this._fetchQRs(CLIENTE, UNIDAD),
                     this._fetchIncidentTypes(CLIENTE, UNIDAD),
@@ -85,7 +95,12 @@
                     this._fetchAccesosHoy(CLIENTE, UNIDAD, 'ACCESO_PEATONAL'),
                     this._fetchAccesosHoy(CLIENTE, UNIDAD, 'ACCESO_VEHICULAR'),
                     this._fetchAccesosHoy(CLIENTE, UNIDAD, 'INCIDENCIAS_REGISTRADAS'),
-                    this._fetchCatalogosAcceso()
+                    this._fetchCatalogosAcceso(),
+                    this._fetchPuestos(CLIENTE, UNIDAD),
+                    this._fetchAccesosHoy(CLIENTE, UNIDAD, 'CUADERNO'),
+                    this._fetchDentro(CLIENTE, UNIDAD, 'ACCESO_VEHICULAR'),
+                    this._fetchDentro(CLIENTE, UNIDAD, 'ACCESO_PEATONAL'),
+                    this._fetchRondasDisponibles(CLIENTE, UNIDAD)
                 ]);
 
                 // 3. Guardar en Caché Local (IndexedDB)
@@ -98,6 +113,11 @@
                     offlineStorage.saveConfig(this.RESOURCES.ACCESO_VEHICULAR_HOY, vehicularHoy),
                     offlineStorage.saveConfig(this.RESOURCES.INCIDENCIAS_HOY, incidenciasHoy),
                     offlineStorage.saveConfig(this.RESOURCES.CATALOGOS_ACCESO, catalogosAcceso),
+                    offlineStorage.saveConfig(this.RESOURCES.PUESTOS, puestos),
+                    offlineStorage.saveConfig(this.RESOURCES.CUADERNO_HOY, cuadernoHoy),
+                    offlineStorage.saveConfig(this.RESOURCES.VEHICULOS_DENTRO, vehiculosDentro),
+                    offlineStorage.saveConfig(this.RESOURCES.PEATONES_DENTRO, peatonesDentro),
+                    offlineStorage.saveConfig(this.RESOURCES.RONDAS_DISPONIBLES, rondasDisponibles),
                     offlineStorage.setGlobalData(`sync-version-${CLIENTE}-${UNIDAD}`, serverVersion),
                     offlineStorage.setGlobalData(`last-sync-check-${CLIENTE}-${UNIDAD}`, Date.now())
                 ]);
@@ -106,6 +126,9 @@
                 console.log(`- QRs: ${qrs.length}, Incidencias: ${incidentTypes.length}`);
                 console.log(`- Consignas: ${consignasPerm.length}P / ${consignasTemp.length}T`);
                 console.log(`- Registros Hoy: ${peatonalHoy.length} Peat / ${vehicularHoy.length} Veh / ${incidenciasHoy.length} Inc`);
+                console.log(`- Puestos: ${puestos.length}, Cuaderno: ${cuadernoHoy.length}`);
+                console.log(`- Dentro: ${vehiculosDentro.length} Veh / ${peatonesDentro.length} Peat`);
+                console.log(`- Rondas Disponibles: ${rondasDisponibles.length}`);
 
                 if (window.UI && UI.updateOfflineBadge) UI.updateOfflineBadge('done');
                 return true;
@@ -151,12 +174,18 @@
             // o simplemente limitamos a los últimos 50 registros para el "Hoy".
             try {
                 const isAcceso = coleccion === 'ACCESO_VEHICULAR' || coleccion === 'ACCESO_PEATONAL';
-                const snap = await db.collection(coleccion)
+                const isCuaderno = coleccion === 'CUADERNO';
+
+                let query = db.collection(coleccion)
                     .where(isAcceso ? (coleccion === 'ACCESO_VEHICULAR' ? 'cliente' : 'CLIENTE') : 'cliente', '==', cliente.toUpperCase())
-                    .where(isAcceso ? (coleccion === 'ACCESO_VEHICULAR' ? 'unidad' : 'UNIDAD') : 'unidad', '==', unidad.toUpperCase())
-                    .orderBy(field, 'desc')
-                    .limit(50)
-                    .get();
+                    .where(isAcceso ? (coleccion === 'ACCESO_VEHICULAR' ? 'unidad' : 'UNIDAD') : 'unidad', '==', unidad.toUpperCase());
+
+                // Solo ordenar si NO es cuaderno para evitar el error de índice reportado
+                if (!isCuaderno) {
+                    query = query.orderBy(field, 'desc');
+                }
+
+                const snap = await query.limit(50).get();
                 return snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             } catch (err) {
                 console.warn(`[Sync] Falló fetch optimizado para ${coleccion}:`, err.message);
@@ -167,12 +196,56 @@
         async _fetchCatalogosAcceso() {
             try {
                 // Descargamos la estructura básica de CLIENTE_UNIDAD para que el menú funcione offline
-                const snap = await db.collection('CLIENTE_UNIDAD').limit(20).get();
+                // Eliminamos limit para asegurar que TODO el catálogo esté disponible
+                const snap = await db.collection('CLIENTE_UNIDAD').get();
                 const catalogos = [];
                 snap.forEach(doc => catalogos.push({ id: doc.id, ...doc.data() }));
                 return catalogos;
             } catch (err) {
                 console.warn('[Sync] Falló fetch de catálogos:', err.message);
+                return [];
+            }
+        },
+
+        async _fetchPuestos(cliente, unidad) {
+            try {
+                const path = `CLIENTE_UNIDAD/${cliente.toUpperCase()}/UNIDADES/${unidad.toUpperCase()}/PUESTOS`;
+                const snap = await db.collection(path).get();
+                return snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            } catch (err) {
+                console.warn('[Sync] Falló fetch de puestos:', err.message);
+                return [];
+            }
+        },
+
+        async _fetchDentro(cliente, unidad, coleccion) {
+            try {
+                const isVeh = coleccion === 'ACCESO_VEHICULAR';
+                const fieldEstado = isVeh ? 'estado' : 'ESTADO';
+                const valueEstado = isVeh ? 'ingreso' : 'ABIERTO';
+
+                const snap = await db.collection(coleccion)
+                    .where(isVeh ? 'cliente' : 'CLIENTE', '==', cliente.toUpperCase())
+                    .where(isVeh ? 'unidad' : 'UNIDAD', '==', unidad.toUpperCase())
+                    .where(fieldEstado, '==', valueEstado)
+                    .limit(100)
+                    .get();
+                return snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            } catch (err) {
+                console.warn(`[Sync] Falló fetch de ${coleccion} dentro:`, err.message);
+                return [];
+            }
+        },
+
+        async _fetchRondasDisponibles(cliente, unidad) {
+            try {
+                const snap = await db.collection('Rondas_QR')
+                    .where('cliente', '==', cliente.toUpperCase())
+                    .where('unidad', '==', unidad.toUpperCase())
+                    .get();
+                return snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            } catch (err) {
+                console.warn('[Sync] Falló fetch de rondas disponibles:', err.message);
                 return [];
             }
         }

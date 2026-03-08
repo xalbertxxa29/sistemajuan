@@ -44,20 +44,45 @@ document.addEventListener('DOMContentLoaded', () => {
   async function cargarAbiertos() {
     cont.innerHTML = '<div class="muted">Cargando…</div>';
     try {
+      // --- NUEVO: Estrategia Cache-First para "Cache Everything" ---
+      if (window.offlineStorage) {
+        const cached = await window.offlineStorage.getConfig('peatones-dentro');
+        if (cached && Array.isArray(cached) && cached.length > 0) {
+          console.log('[salida] 📦 Usando datos de caché (peatones-dentro)');
+          renderAbiertos(cached);
+          if (!navigator.onLine) return;
+        }
+      }
+
       // Solo where, sin orderBy (mejor para offline/evitar índices)
       const qs = await db.collection('ACCESO_PEATONAL').where('ESTADO', '==', 'ABIERTO').get();
       if (qs.empty) {
-        cont.innerHTML = '<div class="muted">No hay accesos abiertos.</div>';
+        if (!cont.querySelector('.list-item')) { // Solo si no cargamos de caché
+          cont.innerHTML = '<div class="muted">No hay accesos abiertos.</div>';
+        }
         return;
       }
-      // Render
-      const frag = document.createDocumentFragment();
-      qs.forEach(doc => {
-        const d = doc.data();
-        const item = document.createElement('button');
-        item.className = 'list-item';
-        item.style.textAlign = 'left';
-        item.innerHTML = `
+
+      const docs = qs.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      renderAbiertos(docs);
+
+    } catch (e) {
+      console.error(e);
+      if (!cont.querySelector('.list-item')) {
+        cont.innerHTML = '<div class="muted">No se pudo cargar la lista.</div>';
+      }
+    }
+  }
+
+  function renderAbiertos(lista) {
+    cont.innerHTML = '';
+    const frag = document.createDocumentFragment();
+    lista.forEach(d => {
+      const id = d.id;
+      const item = document.createElement('button');
+      item.className = 'list-item';
+      item.style.textAlign = 'left';
+      item.innerHTML = `
           <div style="display:flex;justify-content:space-between;align-items:center;gap:.75rem;">
             <div>
               <div class="title">${(d.NOMBRES_COMPLETOS || '').toUpperCase()}</div>
@@ -65,15 +90,10 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
             <div class="muted" style="white-space:nowrap;">${d.FECHA_INGRESO || ''} ${d.HORA_INGRESO || ''}</div>
           </div>`;
-        item.addEventListener('click', () => abrirDetalle(doc.id, d));
-        frag.appendChild(item);
-      });
-      cont.innerHTML = '';
-      cont.appendChild(frag);
-    } catch (e) {
-      console.error(e);
-      cont.innerHTML = '<div class="muted">No se pudo cargar la lista.</div>';
-    }
+      item.addEventListener('click', () => abrirDetalle(id, d));
+      frag.appendChild(item);
+    });
+    cont.appendChild(frag);
   }
 
   cargarAbiertos();

@@ -1,18 +1,20 @@
 <!DOCTYPE html>
 <html lang="es" data-theme="dark">
+
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Consigna Temporal</title>
 
-  <link rel="stylesheet" href="style.css?v=75"/>
-  <link rel="stylesheet" href="webview.css?v=75"/>
+  <link rel="stylesheet" href="style.css?v=75" />
+  <link rel="stylesheet" href="webview.css?v=75" />
   <link rel="manifest" href="manifest.json">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.2.0/css/all.min.css">
 
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
 </head>
+
 <body>
   <div class="list-page-container">
     <div class="list-page-header">
@@ -62,9 +64,13 @@
 
   <div id="loadingOverlay" hidden>
     <div class="loading-box">
-      <div class="loading-brand"><div class="loading-ring"></div></div>
+      <div class="loading-brand">
+        <div class="loading-ring"></div>
+      </div>
       <div class="loading-title">Procesando…</div>
-      <div class="progress-wrap"><div class="progress-bar"></div></div>
+      <div class="progress-wrap">
+        <div class="progress-bar"></div>
+      </div>
     </div>
   </div>
 
@@ -77,9 +83,11 @@
   <!-- Config -->
   <script src="firebase-config.js?v=75"></script>
   <script src="initFirebase.js?v=75"></script>
+  <script src="offline-storage.js?v=75"></script>
+  <script src="offline-queue.js?v=82"></script>
+  <script src="sync.js?v=82"></script>
   <script src="image-optimizer.js?v=75"></script>
   <script src="ui.js?v=75"></script>
-  <script src="sync.js?v=75"></script>
 
 
   <!-- Firma -->
@@ -89,10 +97,11 @@
 
 
   <!-- Lógica -->
-  <script src="consigna_temporal.js?v=75"></script> 
+  <script src="consigna_temporal.js?v=75"></script>
 
   <script>
     if ('serviceWorker' in navigator) { navigator.serviceWorker.register('./sw.js'); }
   </script>
 </body>
+
 </html>

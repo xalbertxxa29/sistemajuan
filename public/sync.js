@@ -113,6 +113,7 @@
           t.kind === 'peatonal-full' ||
           t.kind === 'vehicular-full' ||
           t.kind === 'incidente-full' ||
+          t.kind === 'ronda-programada-point' ||
           t.kind === 'ronda-programada-end'
         ));
 
@@ -161,6 +162,14 @@
             if (t.kind === 'ronda-programada-end' && t.docId) {
               await db.collection(targetCollection).doc(t.docId).update(payload);
               console.log(`[sync] ✅ Ronda programada terminada: ${t.docId}`);
+            } else if (t.kind === 'ronda-programada-point' && t.docId && t.index !== undefined) {
+              const updateKey = `puntosRegistrados.${t.index}`;
+              const updateData = {
+                [updateKey]: payload,
+                ultimaActualizacion: firebase.firestore.FieldValue.serverTimestamp()
+              };
+              await db.collection('RONDAS_COMPLETADAS').doc(t.docId).update(updateData);
+              console.log(`[sync] ✅ Punto ${t.index} sincronizado para ronda ${t.docId}`);
             } else {
               const docRef = await db.collection(targetCollection).add(payload);
               console.log(`[sync] ✅ Documento creado en ${targetCollection}: ${docRef.id}`);
@@ -253,11 +262,11 @@
     if (document.visibilityState === 'visible') flush();
   });
 
-  // Reintento periódico (1 min) para entornos donde 'online' no dispara
+  // Reintento periódico (30 seg) para entornos donde 'online' no dispara
   setInterval(() => {
     // Evita espamear si corrió muy recientemente
-    if (Date.now() - lastRunTs > 45_000) flush();
-  }, 60_000);
+    if (Date.now() - lastRunTs > 25_000) flush();
+  }, 30_000);
 
   // Primer intento inmediato
   flush();

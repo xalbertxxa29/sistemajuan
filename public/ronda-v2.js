@@ -157,6 +157,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   function ocultarOverlay() {
     const overlay = document.getElementById('loading-overlay');
     if (overlay) overlay.remove();
+    // También ocultar el splash screen estático si existe
+    const splash = document.getElementById('app-splash');
+    if (splash) {
+      splash.style.opacity = '0';
+      setTimeout(() => splash.remove(), 400);
+    }
   }
 
   // ===================== HELPER GPS SILENCIOSO =====================
@@ -292,6 +298,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       await Promise.all(tareasParalelas);
 
+      // 🚀 OCULTAR OVERLAY DE CARGA INICIAL
+      ocultarOverlay();
+
       // 🚀 GUARDAR PERFIL PARA OFFLINE
       if (window.offlineStorage) {
         try {
@@ -324,6 +333,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     } catch (e) {
       console.error('[Ronda] Error:', e);
+      ocultarOverlay();
     }
   });
 
@@ -453,15 +463,75 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     if (rondaEnProgreso) return;
 
+    // Helper para obtener estados de rondas de hoy (útil para cache y live)
+    async function obtenerEstadosRondasHoy() {
+      const statusMap = {};
+      const startOfDay = new Date();
+      startOfDay.setHours(0, 0, 0, 0);
+
+      try {
+        const timeoutPromise = new Promise((resolve) => setTimeout(() => resolve('TIMEOUT'), 3000));
+        const fetchHistory = db.collection('RONDAS_COMPLETADAS')
+          .where('usuarioEmail', '==', userCtx.email)
+          .where('horarioInicio', '>=', firebase.firestore.Timestamp.fromDate(startOfDay))
+          .get();
+
+        let historySnap;
+        const resHist = await Promise.race([fetchHistory, timeoutPromise]);
+
+        if (resHist === 'TIMEOUT') {
+          historySnap = await db.collection('RONDAS_COMPLETADAS')
+            .where('usuarioEmail', '==', userCtx.email)
+            .where('horarioInicio', '>=', firebase.firestore.Timestamp.fromDate(startOfDay))
+            .get({ source: 'cache' });
+        } else {
+          historySnap = resHist;
+        }
+
+        if (historySnap && !historySnap.empty) {
+          historySnap.forEach(doc => {
+            const data = doc.data();
+            if (data.rondaId) {
+              statusMap[data.rondaId] = {
+                estado: data.estado,
+                docId: doc.id,
+                data: data
+              };
+            }
+          });
+        }
+      } catch (errHist) {
+        console.warn('[Ronda] No se pudo verificar historial:', errHist);
+      }
+      return statusMap;
+    }
+
     try {
       listDiv.innerHTML = '<div style="color:#ccc; text-align:center;">Cargando rondas...</div>';
 
+      // --- NUEVO: Estrategia Cache-First para "Cache Everything" ---
+      if (window.offlineStorage) {
+        const cachedRondas = await window.offlineStorage.getConfig('rondas-disponibles');
+        if (cachedRondas && Array.isArray(cachedRondas) && cachedRondas.length > 0) {
+          console.log('[Ronda] 📦 Usando datos de caché (rondas-disponibles)');
+
+          // Renderizado inicial con caché
+          const statusMap = await obtenerEstadosRondasHoy();
+          listDiv.innerHTML = '';
+          cachedRondas.forEach(ronda => {
+            const estadoPrevio = statusMap[ronda.id] || null;
+            const card = crearCardRonda(ronda, estadoPrevio);
+            listDiv.appendChild(card);
+          });
+
+          // Si estamos offline, terminamos aquí
+          if (!navigator.onLine) return;
+        }
+      }
+
       // TIMEOUT INTELIGENTE PARA NO ESPERAR ETERNAMENTE SI HAY RED LENTA
       const fetchRondas = db.collection('Rondas_QR').get();
-      const fetchHistory = db.collection('RONDAS_COMPLETADAS')
-        .where('usuarioEmail', '==', userCtx.email)
-        .where('horarioInicio', '>=', firebase.firestore.Timestamp.fromDate(new Date(new Date().setHours(0, 0, 0, 0))))
-        .get();
+      const statusMapPromise = obtenerEstadosRondasHoy();
 
       const timeoutPromise = new Promise((resolve) => setTimeout(() => resolve('TIMEOUT'), 3000));
 
@@ -494,41 +564,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
       }
 
-      const statusMap = {};
-      try {
-        let historySnap;
-        try {
-          const resHist = await Promise.race([fetchHistory, timeoutPromise]);
-          if (resHist === 'TIMEOUT') {
-            historySnap = await db.collection('RONDAS_COMPLETADAS')
-              .where('usuarioEmail', '==', userCtx.email)
-              .where('horarioInicio', '>=', firebase.firestore.Timestamp.fromDate(new Date(new Date().setHours(0, 0, 0, 0))))
-              .get({ source: 'cache' });
-          } else {
-            historySnap = resHist;
-          }
-        } catch (e) {
-          historySnap = await db.collection('RONDAS_COMPLETADAS')
-            .where('usuarioEmail', '==', userCtx.email)
-            .where('horarioInicio', '>=', firebase.firestore.Timestamp.fromDate(new Date(new Date().setHours(0, 0, 0, 0))))
-            .get({ source: 'cache' });
-        }
-
-        if (historySnap && !historySnap.empty) {
-          historySnap.forEach(doc => {
-            const data = doc.data();
-            if (data.rondaId) {
-              statusMap[data.rondaId] = {
-                estado: data.estado,
-                docId: doc.id,
-                data: data
-              };
-            }
-          });
-        }
-      } catch (errHist) {
-        console.warn('No se pudo verificar historial:', errHist);
-      }
+      const statusMap = await statusMapPromise;
 
       if (rondasFiltradas.length === 0) {
         listDiv.innerHTML = '<p style="color:#999; text-align: center; margin-top: 20px;">No hay rondas asignadas.</p>';
@@ -1483,10 +1519,21 @@ document.addEventListener('DOMContentLoaded', async () => {
         ultimaActualizacion: firebase.firestore.Timestamp.now()
       }).then(() => {
         console.log('[Ronda] Punto completado: Guardado parcial en Firebase.');
-      }).catch(err => {
+      }).catch(async err => {
         console.warn('[Ronda] Guardado parcial falló (Offline):', err.code);
-        // Si falló por red, el sync.js normal se encargará después si lo pusieramos en cola,
-        // pero por ahora los puntos parciales confían en la persistencia local de Firestore.
+        // 🚀 GUARDAR EN COLA OFFLINE
+        if (window.OfflineQueue) {
+          await window.OfflineQueue.add({
+            kind: 'ronda-programada-point',
+            docId: rondaIdActual,
+            index: indice,
+            cliente: userCtx.cliente,
+            unidad: userCtx.unidad,
+            data: rondaEnProgreso.puntosRegistrados[indice],
+            createdAt: Date.now()
+          });
+          console.log('[Ronda] Punto encolado para sincronización global.');
+        }
       });
 
       // Actualizar badge si hay cola (ronda-v2 usualmente guarda puntos en RONDAS_COMPLETADAS que tiene persistencia propia)
@@ -1523,8 +1570,20 @@ document.addEventListener('DOMContentLoaded', async () => {
         ultimaActualizacion: firebase.firestore.Timestamp.now()
       }).then(() => {
         console.log('[Ronda] Punto marcado: Guardado parcial en Firebase.');
-      }).catch(err => {
+      }).catch(async err => {
         console.warn('[Ronda] Guardado parcial falló (Offline):', err.code);
+        // 🚀 GUARDAR EN COLA OFFLINE
+        if (window.OfflineQueue) {
+          await window.OfflineQueue.add({
+            kind: 'ronda-programada-point',
+            docId: rondaIdActual,
+            index: indice,
+            cliente: userCtx.cliente,
+            unidad: userCtx.unidad,
+            data: rondaEnProgreso.puntosRegistrados[indice],
+            createdAt: Date.now()
+          });
+        }
       });
 
       console.log('[Ronda] Punto marcado:', indice);
@@ -1619,14 +1678,33 @@ document.addEventListener('DOMContentLoaded', async () => {
       const estado = determinarEstadoRonda();
       const horarioTermino = firebase.firestore.Timestamp.fromDate(calcularHorarioTermino());
 
-      // Guardar estado final en Firebase
-      await db.collection('RONDAS_COMPLETADAS').doc(rondaIdActual).update({
+      // 1. ACTUALIZAR CACHE LOCAL PRIMERO
+      const payloadAuto = {
         estado: estado,
-        horarioTermino: horarioTermino
-      });
+        horarioTermino: horarioTermino,
+        ultimaActualizacion: firebase.firestore.Timestamp.now()
+      };
+      await RONDA_STORAGE.guardarEnCache(rondaIdActual, { ...rondaEnProgreso, ...payloadAuto });
 
-      // Limpiar cache
-      await RONDA_STORAGE.limpiarCache(rondaIdActual);
+      // 2. INTENTAR GUARDAR EN FIREBASE
+      try {
+        await db.collection('RONDAS_COMPLETADAS').doc(rondaIdActual).update(payloadAuto);
+        console.log('[Ronda] Auto-término guardado en Firebase.');
+        // Solo limpiamos si fue exitoso
+        await RONDA_STORAGE.limpiarCache(rondaIdActual);
+      } catch (err) {
+        console.warn('[Ronda] Auto-término falló online, encolando...', err.message);
+        if (window.OfflineQueue) {
+          await window.OfflineQueue.add({
+            kind: 'ronda-programada-end',
+            docId: rondaIdActual,
+            cliente: userCtx.cliente,
+            unidad: userCtx.unidad,
+            data: payloadAuto,
+            createdAt: Date.now()
+          });
+        }
+      }
 
       mostrarResumen(estado);
       rondaEnProgreso = null;

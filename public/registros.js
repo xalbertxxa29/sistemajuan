@@ -201,16 +201,23 @@ document.addEventListener('DOMContentLoaded', () => {
     UX.show('Cargando registros…');
 
     try {
+      // --- NUEVO: Estrategia Cache-First para "Cache Everything" ---
+      if (!direction && window.offlineStorage) {
+        const cached = await window.offlineStorage.getConfig('cuaderno-hoy');
+        if (cached && Array.isArray(cached) && cached.length > 0) {
+          console.log('[registros] 📦 Usando datos de caché (cuaderno-hoy)');
+          // Simular el formato de Firestore para el render
+          const mockDocs = cached.map(d => ({ id: d.id, data: () => d }));
+          render(mockDocs);
+          if (!navigator.onLine) {
+            UX.hide();
+            return;
+          }
+        }
+      }
+
       let cursor = null;
       if (direction === 'next') cursor = lastDoc;
-      if (direction === 'prev') {
-        // Al retroceder, limpiamos el mapa actual parcialmente? No necesario, se sobreescribe en render.
-        // Pero es buena practica resetearlo al cargar nueva pagina
-      }
-      // Resetear mapa al inicio de carga no es seguro si hay race conditions, 
-      // mejor hacerlo justo antes de render.
-
-      if (!direction) { /* Primera carga o buscar */ currentDataById = {}; allLoadedData = []; }
       if (direction === 'prev') {
         if (pageStack.length > 1) {
           pageStack.pop();
