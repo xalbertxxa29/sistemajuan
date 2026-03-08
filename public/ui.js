@@ -66,83 +66,83 @@
       color: '#e9ecf7', display: 'grid', gap: '12px', justifyItems: 'center'
     });
 
-    // --- Spinner con anillos y logo ---
+    // --- Spinner con efecto ESPACIAL (Espirales) ---
     const spinner = document.createElement('div');
-    spinner.className = 'neo-spinner';
-    Object.assign(spinner.style, { position: 'relative', width: '84px', height: '84px', marginTop: '4px' });
+    spinner.className = 'spatial-spinner';
+    Object.assign(spinner.style, {
+      position: 'relative', width: '120px', height: '120px',
+      marginTop: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center'
+    });
 
     const logo = document.createElement('img');
     logo.alt = '';
-    logo.src = 'imagenes/logo_192.png';            // si no existe, se oculta
-    logo.onerror = () => { logo.style.display = 'none'; };
+    logo.src = 'imagenes/logo.png';
+    logo.onerror = () => { logo.src = 'imagenes/logo_192.png'; }; // Fallback
     Object.assign(logo.style, {
-      position: 'absolute', inset: '50% auto auto 50%', transform: 'translate(-50%,-50%)',
-      width: '38px', height: '38px', borderRadius: '50%', boxShadow: '0 0 0 2px rgba(0,0,0,.25)'
+      position: 'absolute', width: '55px', height: '55px', zIndex: '10',
+      borderRadius: '50%', boxShadow: '0 0 25px rgba(231,9,9,.4)',
+      background: 'white', padding: '5px'
     });
 
-    // 3 anillos en conic-gradient con distintos offsets/velocidades
-    const mkRing = (className, dur, from, to) => {
-      const r = document.createElement('div');
-      r.className = className;
-      Object.assign(r.style, {
-        position: 'absolute', inset: '0', borderRadius: '50%',
-        mask: 'radial-gradient(farthest-side, transparent calc(100% - 6px), #000 0)',
-        background: `conic-gradient(var(--ring-color, #2dd4bf) ${from} ${to}, transparent ${to} 100%)`,
-        animation: `neo-spin ${dur} linear infinite`
+    const createSpiral = (className, dur, color, size, delay) => {
+      const s = document.createElement('div');
+      s.className = className;
+      Object.assign(s.style, {
+        position: 'absolute', width: size + 'px', height: size + 'px',
+        border: `2px solid ${color}`, borderRadius: '40% 60% 70% 30% / 40% 50% 60% 50%',
+        opacity: '0.6', boxShadow: `0 0 15px ${color}`,
+        animation: `spatial-spiral ${dur} linear infinite`, animationDelay: delay
       });
-      return r;
+      return s;
     };
 
-    const ring1 = mkRing('ring-1', '1.2s', '0deg', '90deg');   // verde
-    ring1.style.setProperty('--ring-color', '#30d158');
-    ring1.style.filter = 'drop-shadow(0 0 6px rgba(48,209,88,.35))';
-
-    const ring2 = mkRing('ring-2', '1.6s', '140deg', '230deg'); // azul
-    ring2.style.setProperty('--ring-color', '#3ba0ff');
-    ring2.style.animationDirection = 'reverse';
-    ring2.style.filter = 'drop-shadow(0 0 6px rgba(59,160,255,.35))';
-
-    const ring3 = mkRing('ring-3', '2.0s', '260deg', '330deg'); // amarillo
-    ring3.style.setProperty('--ring-color', '#f5cd19');
-    ring3.style.filter = 'drop-shadow(0 0 6px rgba(245,205,25,.35))';
-
-    spinner.append(ring1, ring2, ring3, logo);
+    spinner.append(
+      createSpiral('spiral-1', '3s', '#e70909', 90, '0s'),
+      createSpiral('spiral-2', '4s', '#3ba0ff', 105, '-1s'),
+      createSpiral('spiral-3', '2.5s', '#30d158', 75, '-0.5s'),
+      logo
+    );
 
     // --- Título / subtítulo ---
     overlayTitleEl = document.createElement('div');
     overlayTitleEl.className = 'neo-title';
-    Object.assign(overlayTitleEl.style, { fontSize: '1.05rem', fontWeight: '700', textAlign: 'center', marginTop: '6px' });
-    overlayTitleEl.textContent = 'Cargando…';
+    Object.assign(overlayTitleEl.style, {
+      fontSize: '1.2rem', fontWeight: '800', textAlign: 'center',
+      marginTop: '15px', color: '#fff', textShadow: '0 0 10px rgba(255,255,255,0.5)'
+    });
+    overlayTitleEl.textContent = 'Procesando…';
 
     overlaySubEl = document.createElement('div');
     overlaySubEl.className = 'neo-sub';
-    Object.assign(overlaySubEl.style, { fontSize: '.9rem', color: '#b9c0d4', textAlign: 'center', marginTop: '-2px' });
+    Object.assign(overlaySubEl.style, {
+      fontSize: '.95rem', color: '#aab1c0', textAlign: 'center', marginTop: '4px'
+    });
     overlaySubEl.textContent = '';
 
-    // --- Barra de progreso (opcional/determinada) ---
+    // --- Barra de progreso ---
     const progressWrap = document.createElement('div');
     progressWrap.className = 'neo-progress';
     Object.assign(progressWrap.style, {
-      width: '100%', height: '6px', borderRadius: '6px',
-      background: 'rgba(255,255,255,.12)', overflow: 'hidden', display: 'none'
+      width: '100%', height: '4px', borderRadius: '10px',
+      background: 'rgba(255,255,255,.05)', overflow: 'hidden', display: 'none', marginTop: '15px'
     });
 
     const bar = document.createElement('div');
     Object.assign(bar.style, {
-      width: '0%', height: '100%', background: 'linear-gradient(90deg,#30d158,#3ba0ff,#f5cd19)',
-      transition: 'width .25s ease', willChange: 'width'
+      width: '0%', height: '100%', background: 'linear-gradient(90deg, #e70909, #3ba0ff, #30d158)',
+      boxShadow: '0 0 10px rgba(59,160,255,0.8)', transition: 'width .3s ease'
     });
     progressWrap.appendChild(bar);
     overlayBarEl = bar;
 
-    // estilos clave
     const style = document.createElement('style');
     style.textContent = `
-      @keyframes neo-spin { from{ transform: rotate(0deg);} to{ transform: rotate(360deg);} }
-      @media (prefers-reduced-motion: reduce) {
-        .neo-spinner .ring-1,.neo-spinner .ring-2,.neo-spinner .ring-3{ animation-duration: 2.4s !important; }
+      @keyframes spatial-spiral {
+        0% { transform: rotate(0deg) scale(1); opacity: 0.4; }
+        50% { transform: rotate(180deg) scale(1.1); opacity: 0.8; }
+        100% { transform: rotate(360deg) scale(1); opacity: 0.4; }
       }
-      /* también estilos mínimos para dropdown items, como en v40 */
+      .spatial-spinner div { mix-blend-mode: screen; }
       .dropdown-item { padding:.4rem .55rem; cursor:pointer; }
       .dropdown-item:hover, .dropdown-item.active { background: rgba(255,255,255,.06); }
     `;

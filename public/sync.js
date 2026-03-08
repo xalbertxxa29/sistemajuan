@@ -176,6 +176,23 @@
             // Agregar timestamp de sincronización
             payload.sincronizadoEn = firebase.firestore.FieldValue.serverTimestamp();
 
+            // --- RECONSTRUCCIÓN DE TIMESTAMPS PARA RONDAS ---
+            // IndexedDB elimina los métodos de los objetos (convierte Timestamp a un objeto simple {seconds, nanoseconds})
+            const restoreTs = (val) => {
+              if (!val) return val;
+              if (typeof val.toDate === 'function') return val; // Ya es Timestamp
+              if (typeof val === 'object' && typeof val.seconds === 'number' && typeof val.nanoseconds === 'number') {
+                return new firebase.firestore.Timestamp(val.seconds, val.nanoseconds);
+              }
+              if (typeof val === 'string' && !isNaN(Date.parse(val))) {
+                return firebase.firestore.Timestamp.fromDate(new Date(val));
+              }
+              return val;
+            };
+
+            if (payload.horarioInicio) payload.horarioInicio = restoreTs(payload.horarioInicio);
+            if (payload.horarioTermino) payload.horarioTermino = restoreTs(payload.horarioTermino);
+
             // Crear o Actualizar documento
             if (t.kind === 'ronda-programada-end' && t.docId) {
               await db.collection(targetCollection).doc(t.docId).update(payload);
@@ -184,9 +201,7 @@
               const updateKey = `puntosRegistrados.${t.index}`;
 
               // Asegurar que el timestamp del punto sea un objeto Timestamp
-              if (payload.timestamp && typeof payload.timestamp === 'string') {
-                payload.timestamp = firebase.firestore.Timestamp.fromDate(new Date(payload.timestamp));
-              }
+              if (payload.timestamp) payload.timestamp = restoreTs(payload.timestamp);
 
               const updateData = {
                 [updateKey]: payload,

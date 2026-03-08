@@ -569,10 +569,21 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
             // Si hay un fin de ronda en cola
             if (t.kind === 'ronda-programada-end' && t.docId) {
+              let found = false;
               for (const rId in statusMap) {
                 if (statusMap[rId].docId === t.docId) {
                   statusMap[rId].estado = t.data.estado || 'TERMINADA';
+                  found = true;
                 }
+              }
+              // FIX: Si el servidor omitió el inicio de ronda (por bug de fechas pasadas)
+              // pero sabemos que terminó offline, la forzamos terminada en el UI
+              if (!found && t.data && t.data.rondaId) {
+                statusMap[t.data.rondaId] = {
+                  estado: t.data.estado || 'TERMINADA',
+                  docId: t.docId,
+                  data: t.data
+                };
               }
             }
           });
