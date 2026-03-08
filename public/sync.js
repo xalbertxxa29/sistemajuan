@@ -63,9 +63,12 @@
 
     const db = firebase.firestore?.();
     const storage = firebase.storage?.();
-    if (!db || !storage) {
-      console.log('[sync] ⚠️ Firestore o Storage no disponibles');
+    if (!db) {
+      console.log('[sync] ⚠️ Firestore no disponible');
       return;
+    }
+    if (!storage) {
+      console.log('[sync] ⚠️ Storage no disponible (se omitirán archivos)');
     }
 
     isFlushing = true;
@@ -114,7 +117,9 @@
           t.kind === 'vehicular-full' ||
           t.kind === 'incidente-full' ||
           t.kind === 'ronda-programada-point' ||
-          t.kind === 'ronda-programada-end'
+          t.kind === 'ronda-programada-end' ||
+          t.kind === 'ronda-start' ||
+          t.kind === 'relevo-full'
         ));
 
         if (isFullDocCreation) {
@@ -127,32 +132,45 @@
             if (t.kind === 'peatonal-full') targetCollection = 'ACCESO_PEATONAL';
             else if (t.kind === 'vehicular-full') targetCollection = 'ACCESO_VEHICULAR';
             else if (t.kind === 'incidente-full') targetCollection = 'INCIDENCIAS_REGISTRADAS';
-            else if (t.kind === 'ronda-programada-end') targetCollection = 'RONDAS_COMPLETADAS';
+            else if (t.kind === 'ronda-programada-end' || t.kind === 'ronda-start') targetCollection = 'RONDAS_COMPLETADAS';
+            else if (t.kind === 'relevo-full') targetCollection = 'CUADERNO';
 
             // Subir foto si viene en base64
             if (payload.foto && payload.foto.startsWith('data:')) {
-              const folder = t.kind === 'ronda-manual-full' ? 'rondas_manuales' :
-                t.kind === 'vehicular-full' ? 'acceso-vehicular' :
-                  t.kind === 'incidente-full' ? 'incidencias' : 'misc';
-              const url = await uploadTo(storage, `${folder}/${cliente}/${unidad}/${stamp}_foto.jpg`, payload.foto);
-              payload.foto = url;
-              console.log(`[sync] Foto subida: ${url}`);
+              if (!storage) {
+                console.warn('[sync] Omitiendo foto doc: Storage no disponible');
+              } else {
+                const folder = t.kind === 'ronda-manual-full' ? 'rondas_manuales' :
+                  t.kind === 'vehicular-full' ? 'acceso-vehicular' :
+                    t.kind === 'incidente-full' ? 'incidencias' : 'misc';
+                const url = await uploadTo(storage, `${folder}/${cliente}/${unidad}/${stamp}_foto.jpg`, payload.foto);
+                payload.foto = url;
+                console.log(`[sync] Foto subida: ${url}`);
+              }
             }
 
             // Subir fotoBase64 (vehicular)
             if (payload.fotoBase64 && payload.fotoBase64.startsWith('data:')) {
-              const url = await uploadTo(storage, `acceso-vehicular/${cliente}/${unidad}/${stamp}_foto.jpg`, payload.fotoBase64);
-              payload.fotoURL = url;
-              delete payload.fotoBase64;
-              console.log(`[sync] FotoBase64 subida: ${url}`);
+              if (!storage) {
+                console.warn('[sync] Omitiendo fotoBase64: Storage no disponible');
+              } else {
+                const url = await uploadTo(storage, `acceso-vehicular/${cliente}/${unidad}/${stamp}_foto.jpg`, payload.fotoBase64);
+                payload.fotoURL = url;
+                delete payload.fotoBase64;
+                console.log(`[sync] FotoBase64 subida: ${url}`);
+              }
             }
 
             // Subir fotoEmbedded (incidentes)
             if (payload.fotoEmbedded && payload.fotoEmbedded.startsWith('data:')) {
-              const url = await uploadTo(storage, `incidencias/${cliente}/${unidad}/${stamp}_foto.jpg`, payload.fotoEmbedded);
-              payload.fotoURL = url;
-              delete payload.fotoEmbedded;
-              console.log(`[sync] FotoEmbedded subida: ${url}`);
+              if (!storage) {
+                console.warn('[sync] Omitiendo fotoEmbedded: Storage no disponible');
+              } else {
+                const url = await uploadTo(storage, `incidencias/${cliente}/${unidad}/${stamp}_foto.jpg`, payload.fotoEmbedded);
+                payload.fotoURL = url;
+                delete payload.fotoEmbedded;
+                console.log(`[sync] FotoEmbedded subida: ${url}`);
+              }
             }
 
             // Agregar timestamp de sincronización
@@ -170,6 +188,9 @@
               };
               await db.collection('RONDAS_COMPLETADAS').doc(t.docId).update(updateData);
               console.log(`[sync] ✅ Punto ${t.index} sincronizado para ronda ${t.docId}`);
+            } else if (t.kind === 'ronda-start' && t.docId) {
+              await db.collection(targetCollection).doc(t.docId).set(payload);
+              console.log(`[sync] ✅ Ronda iniciada sincronizada: ${t.docId}`);
             } else {
               const docRef = await db.collection(targetCollection).add(payload);
               console.log(`[sync] ✅ Documento creado en ${targetCollection}: ${docRef.id}`);
@@ -204,17 +225,25 @@
 
         try {
           if (fotoEmbedded) {
-            const url = await uploadTo(storage, `${baseFolder}/${cliente}/${unidad}/${stamp}_foto.jpg`, fotoEmbedded);
-            updates.fotoURL = url;
-            updates.fotoEmbedded = firebase.firestore.FieldValue.delete();
-            changed = true;
+            if (!storage) {
+              console.warn('[sync] Omitiendo foto: Storage no disponible');
+            } else {
+              const url = await uploadTo(storage, `${baseFolder}/${cliente}/${unidad}/${stamp}_foto.jpg`, fotoEmbedded);
+              updates.fotoURL = url;
+              updates.fotoEmbedded = firebase.firestore.FieldValue.delete();
+              changed = true;
+            }
           }
 
           if (firmaEmbedded) {
-            const url = await uploadTo(storage, `${baseFolder}/${cliente}/${unidad}/${stamp}_firma.png`, firmaEmbedded);
-            updates.firmaURL = url;
-            updates.firmaEmbedded = firebase.firestore.FieldValue.delete();
-            changed = true;
+            if (!storage) {
+              console.warn('[sync] Omitiendo firma: Storage no disponible');
+            } else {
+              const url = await uploadTo(storage, `${baseFolder}/${cliente}/${unidad}/${stamp}_firma.png`, firmaEmbedded);
+              updates.firmaURL = url;
+              updates.firmaEmbedded = firebase.firestore.FieldValue.delete();
+              changed = true;
+            }
           }
 
           // Aplica cambios si hubo algo que actualizar

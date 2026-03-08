@@ -1,4 +1,4 @@
-﻿const V = 'v84';
+﻿const V = 'v86';
 const PRECACHE = `precache-${V}`;
 const RUNTIME = `runtime-${V}`;
 
