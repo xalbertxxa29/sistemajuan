@@ -61,10 +61,58 @@ document.addEventListener('DOMContentLoaded', () => {
   // ---------- Utilidades ----------
   const toDateTimeText = (ts) => {
     try {
-      const date = ts?.toDate ? ts.toDate() : (ts instanceof Date ? ts : null);
-      return date ? date.toLocaleString('es-PE', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' }) : '';
+      if (!ts) return '';
+      let date;
+      if (ts.toDate) {
+        date = ts.toDate();
+      } else if (ts instanceof Date) {
+        date = ts;
+      } else if (typeof ts === 'number') {
+        date = new Date(ts);
+      } else if (typeof ts === 'string') {
+        date = new Date(ts);
+      } else {
+        return '';
+      }
+
+      if (isNaN(date.getTime())) return '';
+
+      return date.toLocaleString('es-PE', {
+        hour: '2-digit', minute: '2-digit', second: '2-digit',
+        day: '2-digit', month: '2-digit', year: 'numeric'
+      });
     } catch { return ''; }
   };
+
+  function resolveRegistradoPor(d) {
+    if (!d) return '—';
+    const candidatos = [
+      d.registradoPor,
+      d.REGISTRADO_POR,
+      d.registrado_por,
+      d.nombreCompleto,
+      d.nombreUsuario,
+      d.usuario
+    ];
+
+    for (let c of candidatos) {
+      if (typeof c === 'string' && c.toLowerCase() !== 'usuario' && c !== '—' && c.trim().length > 2) {
+        // Si es Relevo, a veces vienen nombres en objetos
+        return c.toUpperCase();
+      }
+    }
+
+    if (d.nombres || d.apellidos) {
+      return `${d.nombres || ''} ${d.apellidos || ''}`.trim().toUpperCase() || 'USUARIO';
+    }
+
+    const idCandidatos = [d.usuarioID, d.usuarioEmail, d.uploadedBy];
+    for (let id of idCandidatos) {
+      if (id && typeof id === 'string') return id.split('@')[0].toUpperCase();
+    }
+
+    return 'USUARIO';
+  }
 
   const startEndOfDay = (yyyy_mm_dd) => {
     const start = new Date(`${yyyy_mm_dd}T00:00:00`);
@@ -119,9 +167,9 @@ document.addEventListener('DOMContentLoaded', () => {
       </div>`;
   }
 
-  function cardRegistroHTML(data) {
+  function cardRegistroHTML(data, resolvedQuien) {
     const fechaTxt = toDateTimeText(data.timestamp);
-    const quien = resolveRegistradoPor(data);
+    const quien = resolvedQuien || resolveRegistradoPor(data);
     const comentario = (data.comentario || '').replace(/\n/g, '<br>');
     const fotoHTML = onlyPhotoHTML(data);
     return `
@@ -136,13 +184,12 @@ document.addEventListener('DOMContentLoaded', () => {
       </article>`;
   }
 
-  function cardRelevoHTML(data) {
+  function cardRelevoHTML(data, resolvedQuien) {
     const fechaTxt = toDateTimeText(data.timestamp);
     const comentario = (data.comentario || '').replace(/\n/g, '<br>');
-    // v73: Mostrar nombre completo (en el objeto nombre) o fallback al id
     const sal = data.usuarioSaliente?.nombre || data.usuarioSaliente?.id || '';
     const ent = data.usuarioEntrante?.nombre || data.usuarioEntrante?.id || '';
-    const quien = resolveRegistradoPor(data);
+    const quien = resolvedQuien || resolveRegistradoPor(data);
     const fotoHTML = onlyPhotoHTML(data);
     return `
       <article class="list-card">
@@ -157,20 +204,28 @@ document.addEventListener('DOMContentLoaded', () => {
       </article>`;
   }
 
-  function render(docs) {
+  async function render(docs) {
     cont.innerHTML = '';
     if (!docs.length) {
       cont.innerHTML = `<p class="muted">Sin registros.</p>`;
       return;
     }
 
-    docs.forEach(d => {
+    // Resolver nombres de usuario asíncronamente en lote
+    const entries = await Promise.all(docs.map(async d => {
       const data = d.data();
-      currentDataById[d.id] = data; // Keep for safety, though used directly in closure
+      let resolvedName = null;
+      if (window.ReportService) {
+        resolvedName = await window.ReportService.resolveUserName(data);
+      }
+      return { data, resolvedName, id: d.id };
+    }));
+
+    entries.forEach(({ data, resolvedName, id }) => {
+      currentDataById[id] = data;
 
       const tempDiv = document.createElement('div');
-      // Generar HTML base
-      tempDiv.innerHTML = (data.tipoRegistro === 'RELEVO') ? cardRelevoHTML(data) : cardRegistroHTML(data);
+      tempDiv.innerHTML = (data.tipoRegistro === 'RELEVO') ? cardRelevoHTML(data, resolvedName) : cardRegistroHTML(data, resolvedName);
       const article = tempDiv.firstElementChild;
 
       // Agregar botón de reporte al final (estilo ver_incidencias)

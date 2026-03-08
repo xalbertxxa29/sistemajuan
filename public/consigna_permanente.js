@@ -1,24 +1,24 @@
 // consigna_permanente.js (v51) — Guarda registradoPor y puesto. Offline-friendly.
 document.addEventListener('DOMContentLoaded', () => {
   if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
-  const auth    = firebase.auth();
-  const db      = firebase.firestore();
+  const auth = firebase.auth();
+  const db = firebase.firestore();
   const storage = firebase.storage();
 
   const UX = {
     show: (m) => (window.UI && UI.showOverlay) ? UI.showOverlay(m) : void 0,
     hide: () => (window.UI && UI.hideOverlay) ? UI.hideOverlay() : void 0,
-    alert: (t, m, cb) => (window.UI && UI.alert) ? UI.alert(t, m, cb) : (alert(`${t}\n\n${m||''}`), cb && cb())
+    alert: (t, m, cb) => (window.UI && UI.alert) ? UI.alert(t, m, cb) : (alert(`${t}\n\n${m || ''}`), cb && cb())
   };
 
   // DOM
-  const form        = document.getElementById('consigna-permanente-form');
-  const tituloEl    = document.getElementById('titulo');
+  const form = document.getElementById('consigna-permanente-form');
+  const tituloEl = document.getElementById('titulo');
   const descripcionEl = document.getElementById('descripcion');
-  const fotoInput   = document.getElementById('foto-input');
+  const fotoInput = document.getElementById('foto-input');
   const fotoPreview = document.getElementById('foto-preview');
-  const canvas      = document.getElementById('firma-canvas');
-  const clearBtn    = document.getElementById('clear-firma');
+  const canvas = document.getElementById('firma-canvas');
+  const clearBtn = document.getElementById('clear-firma');
 
   // Firma
   const sigPad = new SignaturePad(canvas, { backgroundColor: 'rgb(255,255,255)' });
@@ -37,11 +37,11 @@ document.addEventListener('DOMContentLoaded', () => {
   let pendingPhoto = null;
   fotoInput?.addEventListener('change', async () => {
     const f = fotoInput.files && fotoInput.files[0];
-    if (!f) { pendingPhoto=null; fotoPreview.hidden=true; fotoPreview.src=''; return; }
+    if (!f) { pendingPhoto = null; fotoPreview.hidden = true; fotoPreview.src = ''; return; }
     try {
       UX.show('Procesando imagen…');
-      const opt = { maxSizeMB:0.5, maxWidthOrHeight:1280, useWebWorker:true, fileType:'image/jpeg' };
-      
+      const opt = { maxSizeMB: 0.5, maxWidthOrHeight: 1280, useWebWorker: true, fileType: 'image/jpeg' };
+
       // Intentar usar imageCompression, si no existe usar fallback
       if (typeof imageCompression !== 'undefined') {
         pendingPhoto = await imageCompression(f, opt);
@@ -49,12 +49,12 @@ document.addEventListener('DOMContentLoaded', () => {
         console.warn('imageCompression no disponible, usando imagen original');
         pendingPhoto = f;
       }
-      
+
       fotoPreview.src = URL.createObjectURL(pendingPhoto);
       fotoPreview.hidden = false;
     } catch (e) {
-      console.error('Error procesando imagen:',e);
-      UX.alert('Aviso','No se pudo procesar la imagen. Se usará la original.');
+      console.error('Error procesando imagen:', e);
+      UX.alert('Aviso', 'No se pudo procesar la imagen. Se usará la original.');
       pendingPhoto = f; // Usar imagen original como fallback
       fotoPreview.src = URL.createObjectURL(f);
       fotoPreview.hidden = false;
@@ -62,17 +62,17 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Utils
-  function dataURLtoBlob(u){
-    const a=u.split(','),m=a[0].match(/:(.*?);/)[1];
-    const b=atob(a[1]);let n=b.length;const x=new Uint8Array(n);
-    while(n--)x[n]=b.charCodeAt(n);
-    return new Blob([x],{type:m});
+  function dataURLtoBlob(u) {
+    const a = u.split(','), m = a[0].match(/:(.*?);/)[1];
+    const b = atob(a[1]); let n = b.length; const x = new Uint8Array(n);
+    while (n--) x[n] = b.charCodeAt(n);
+    return new Blob([x], { type: m });
   }
   const blobToDataURL = (blob) => new Promise((res, rej) => {
-    const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=rej; r.readAsDataURL(blob);
+    const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(blob);
   });
-  async function uploadTo(p,blob){
-    const ref=storage.ref().child(p);
+  async function uploadTo(p, blob) {
+    const ref = storage.ref().child(p);
     await ref.put(blob);
     return await ref.getDownloadURL();
   }
@@ -80,27 +80,27 @@ document.addEventListener('DOMContentLoaded', () => {
   // Perfil
   let profile = null;
   auth.onAuthStateChanged(async (user) => {
-    if (!user) { window.location.href='index.html'; return; }
+    if (!user) { window.location.href = 'index.html'; return; }
     const userId = user.email.split('@')[0];
-    const doc = await db.collection('USUARIOS').doc(userId).get().catch(()=>null);
-    if (!doc || !doc.exists) { UX.alert('Error','No se encontró tu perfil.'); window.location.href='menu.html'; return; }
+    const doc = await db.collection('USUARIOS').doc(userId).get().catch(() => null);
+    if (!doc || !doc.exists) { UX.alert('Error', 'No se encontró tu perfil.'); window.location.href = 'menu.html'; return; }
     profile = doc.data(); // { CLIENTE, UNIDAD, PUESTO, NOMBRES, APELLIDOS, ... }
   });
 
   // Guardar
   form?.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const titulo = (tituloEl.value||'').trim();
-    const descripcion = (descripcionEl.value||'').trim();
-    if (!titulo || !descripcion) { UX.alert('Aviso','Completa título y descripción.'); return; }
-    if (!profile) { UX.alert('Error','Perfil no cargado.'); return; }
+    const titulo = (tituloEl.value || '').trim();
+    const descripcion = (descripcionEl.value || '').trim();
+    if (!titulo || !descripcion) { UX.alert('Aviso', 'Completa título y descripción.'); return; }
+    if (!profile) { UX.alert('Error', 'Perfil no cargado.'); return; }
 
     UX.show('Guardando consigna…');
     try {
       const { CLIENTE, UNIDAD, PUESTO, NOMBRES, APELLIDOS } = profile;
       const stamp = Date.now();
 
-      let fotoURL=null, fotoEmbedded=null;
+      let fotoURL = null, fotoEmbedded = null;
       if (pendingPhoto) {
         try {
           if (!navigator.onLine) throw new Error('offline');
@@ -110,7 +110,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       }
 
-      let firmaURL=null, firmaEmbedded=null;
+      let firmaURL = null, firmaEmbedded = null;
       if (!sigPad.isEmpty()) {
         const firmaBlob = dataURLtoBlob(sigPad.toDataURL('image/png'));
         try {
@@ -121,11 +121,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       }
 
-      await db.collection('CONSIGNA_PERMANENTE').add({
+      const payload = {
         cliente: CLIENTE,
         unidad: UNIDAD,
-        puesto: PUESTO || null,                                // NUEVO (si no lo tenías)
-        registradoPor: `${NOMBRES||''} ${APELLIDOS||''}`.trim(),// NUEVO
+        puesto: PUESTO || null,
+        registradoPor: `${NOMBRES || ''} ${APELLIDOS || ''}`.trim(),
         titulo,
         descripcion,
         timestamp: firebase.firestore.FieldValue.serverTimestamp(),
@@ -133,10 +133,49 @@ document.addEventListener('DOMContentLoaded', () => {
         ...(firmaURL ? { firmaURL } : {}),
         ...(fotoEmbedded ? { fotoEmbedded } : {}),
         ...(firmaEmbedded ? { firmaEmbedded } : {}),
-      });
+      };
+
+      // --- Lógica de Guardado (Online/Offline) ---
+      if (!navigator.onLine) {
+        if (window.OfflineQueue) {
+          await window.OfflineQueue.add({
+            kind: 'consigna-permanente-full',
+            collection: 'CONSIGNA_PERMANENTE',
+            cliente: CLIENTE,
+            unidad: UNIDAD,
+            data: { ...payload, timestamp: new Date().toISOString() },
+            createdAt: Date.now()
+          });
+          UX.hide();
+          UX.alert('Guardado Offline', 'Sin conexión. La consigna se guardó localmente y se enviará al conectar.', () => window.location.href = 'menu.html');
+          return;
+        }
+      }
+
+      try {
+        const timeoutPromise = new Promise((_, rej) => setTimeout(() => rej(new Error('Timeout')), 6000));
+        const savePromise = db.collection('CONSIGNA_PERMANENTE').add(payload);
+        await Promise.race([savePromise, timeoutPromise]);
+      } catch (errSync) {
+        console.warn('Fallo guardado online, intentando offline backup...', errSync);
+        if (window.OfflineQueue) {
+          await window.OfflineQueue.add({
+            kind: 'consigna-permanente-full',
+            collection: 'CONSIGNA_PERMANENTE',
+            cliente: CLIENTE,
+            unidad: UNIDAD,
+            data: { ...payload, timestamp: new Date().toISOString() },
+            createdAt: Date.now()
+          });
+          UX.hide();
+          UX.alert('Guardado Offline', 'Red inestable. Se guardó una copia local para sincronización.', () => window.location.href = 'menu.html');
+          return;
+        }
+        throw errSync;
+      }
 
       UX.hide();
-      UX.alert('Éxito','Consigna permanente guardada.', () => window.location.href='menu.html');
+      UX.alert('Éxito', 'Consigna permanente guardada.', () => window.location.href = 'menu.html');
     } catch (err) {
       console.error(err);
       UX.hide();

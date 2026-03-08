@@ -925,10 +925,43 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       rondaIdActual = docId;
 
-      // Guardar en RONDAS_COMPLETADAS con ID = ronda.id (sin duplicados)
-      await db.collection('RONDAS_COMPLETADAS').doc(docId).set(rondaEnProgreso);
+      // --- Lógica de Guardado (Online/Offline) ---
+      if (!navigator.onLine) {
+        if (window.OfflineQueue) {
+          await window.OfflineQueue.add({
+            kind: 'ronda-start',
+            collection: 'RONDAS_COMPLETADAS',
+            docId: docId,
+            cliente: userCtx.cliente,
+            unidad: userCtx.unidad,
+            data: { ...rondaEnProgreso, horarioInicio: new Date().toISOString() },
+            createdAt: Date.now()
+          });
+          console.log('[Ronda] Inicio encolado offline.');
+        }
+      } else {
+        try {
+          const timeoutPromise = new Promise((_, rej) => setTimeout(() => rej(new Error('Timeout')), 6000));
+          const savePromise = db.collection('RONDAS_COMPLETADAS').doc(docId).set(rondaEnProgreso);
+          await Promise.race([savePromise, timeoutPromise]);
+          console.log('[Ronda] Inicio guardado online en Firestore.');
+        } catch (errSync) {
+          console.warn('Fallo inicio online ronda, encolando...', errSync);
+          if (window.OfflineQueue) {
+            await window.OfflineQueue.add({
+              kind: 'ronda-start',
+              collection: 'RONDAS_COMPLETADAS',
+              docId: docId,
+              cliente: userCtx.cliente,
+              unidad: userCtx.unidad,
+              data: { ...rondaEnProgreso, horarioInicio: new Date().toISOString() },
+              createdAt: Date.now()
+            });
+          }
+        }
+      }
 
-      // Guardar en cache local para acceso offline
+      // Guardar en cache local para acceso offline inmediato
       await RONDA_STORAGE.guardarEnCache(docId, rondaEnProgreso);
 
       console.log('[Ronda] Iniciada con ID:', docId);

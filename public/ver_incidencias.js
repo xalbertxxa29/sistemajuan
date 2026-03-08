@@ -59,15 +59,26 @@ document.addEventListener('DOMContentLoaded', () => {
   // ---------- Utilidades ----------
   const toDateTimeText = (ts) => {
     try {
-      const date = ts?.toDate ? ts.toDate() : (ts instanceof Date ? ts : (typeof ts === 'number' ? new Date(ts) : null));
-      if (!date) return '';
+      if (!ts) return '';
+      let date;
+      if (ts.toDate) {
+        date = ts.toDate();
+      } else if (ts instanceof Date) {
+        date = ts;
+      } else if (typeof ts === 'number') {
+        date = new Date(ts);
+      } else if (typeof ts === 'string') {
+        date = new Date(ts); // Soporte para strings ISO del caché
+      } else {
+        return '';
+      }
 
-      // Forzar formato dd/mm/yyyy
+      if (isNaN(date.getTime())) return '';
+
       const d = date.getDate().toString().padStart(2, '0');
       const m = (date.getMonth() + 1).toString().padStart(2, '0');
       const y = date.getFullYear();
 
-      // Forzar formato hh:mm:ss
       const hh = date.getHours().toString().padStart(2, '0');
       const mm = date.getMinutes().toString().padStart(2, '0');
       const ss = date.getSeconds().toString().padStart(2, '0');
@@ -113,17 +124,38 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function resolveRegistradoPor(d) {
-    if (d.registradoPor) {
-      if (typeof d.registradoPor === 'string') return d.registradoPor;
-      if (d.registradoPor.nombre) return d.registradoPor.nombre;
+    if (!d) return '—';
+    // 1. Priorizar campos de nombre completo
+    const candidatos = [
+      d.registradoPor,
+      d.REGISTRADO_POR,
+      d.registrado_por,
+      d.nombreCompleto,
+      d.nombreUsuario
+    ];
+
+    for (let c of candidatos) {
+      if (c && typeof c === 'string' && c.toLowerCase() !== 'usuario' && c !== '—' && c.trim().length > 2) {
+        return c.toUpperCase();
+      }
     }
-    if (d.usuario) return d.usuario;
-    if (d.REGISTRADO_POR || d.registrado_por) return d.REGISTRADO_POR || d.registrado_por;
-    if (d.nombres || d.apellidos) return `${d.nombres || ''} ${d.apellidos || ''}`.trim();
-    if (d.usuarioEmail) return d.usuarioEmail;
-    if (d.usuarioID) return d.usuarioID;
-    if (d.uploadedBy) return d.uploadedBy;
-    return '—';
+
+    // 2. Componer de nombres y apellidos
+    if (d.nombres || d.apellidos || d.NOMBRES || d.APELLIDOS) {
+      const n = (d.nombres || d.NOMBRES || '').trim();
+      const a = (d.apellidos || d.APELLIDOS || '').trim();
+      if ((n + a).length > 2) return `${n} ${a}`.trim().toUpperCase();
+    }
+
+    // 3. Fallbacks de ID o Email
+    const idCandidatos = [d.usuarioID, d.usuario, d.usuarioEmail, d.uploadedBy];
+    for (let id of idCandidatos) {
+      if (id && typeof id === 'string' && id.trim().length > 1) {
+        return id.split('@')[0].toUpperCase();
+      }
+    }
+
+    return 'USUARIO';
   }
 
   function onlyPhotoHTML(data) {
@@ -136,9 +168,9 @@ document.addEventListener('DOMContentLoaded', () => {
       </div>`;
   }
 
-  function cardIncidenciaHTML(data) {
+  function cardIncidenciaHTML(data, resolvedQuien) {
     const fechaTxt = toDateTimeText(data.timestamp);
-    const quien = resolveRegistradoPor(data);
+    const quien = resolvedQuien || resolveRegistradoPor(data);
     const comentario = (data.comentario || '').replace(/\n/g, '<br>');
     const fotoHTML = onlyPhotoHTML(data);
 
@@ -175,16 +207,26 @@ document.addEventListener('DOMContentLoaded', () => {
       </article>`;
   }
 
-  function render(docs) {
+  async function render(docs) {
     cont.innerHTML = '';
     if (!docs.length) {
       cont.innerHTML = `<p class="muted">Sin incidencias registradas.</p>`;
       return;
     }
-    docs.forEach(d => {
+
+    // Resolver nombres de usuario asíncronamente en lote
+    const entries = await Promise.all(docs.map(async d => {
       const data = d.data();
+      let resolvedName = null;
+      if (window.ReportService) {
+        resolvedName = await window.ReportService.resolveUserName(data);
+      }
+      return { data, resolvedName };
+    }));
+
+    entries.forEach(({ data, resolvedName }) => {
       const tempDiv = document.createElement('div');
-      tempDiv.innerHTML = cardIncidenciaHTML(data);
+      tempDiv.innerHTML = cardIncidenciaHTML(data, resolvedName);
       const article = tempDiv.firstElementChild;
 
       // Add button

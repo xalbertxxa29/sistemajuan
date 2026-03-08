@@ -352,7 +352,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
 
         // Crear registro de relevo
-        await db.collection("CUADERNO").add({
+        const relevoData = {
           tipoRegistro: "RELEVO",
           cliente: usuarioSalienteData.CLIENTE,
           unidad: usuarioSalienteData.UNIDAD,
@@ -367,7 +367,41 @@ document.addEventListener("DOMContentLoaded", () => {
             id,
             nombre: `${u.NOMBRES} ${u.APELLIDOS}`.trim().toUpperCase()
           }
-        });
+        };
+
+        // --- Lógica de Guardado (Online/Offline) ---
+        if (!navigator.onLine) {
+          if (window.OfflineQueue) {
+            await window.OfflineQueue.add({
+              kind: 'relevo-full',
+              collection: 'CUADERNO',
+              cliente: usuarioSalienteData.CLIENTE,
+              unidad: usuarioSalienteData.UNIDAD,
+              data: { ...relevoData, timestamp: new Date().toISOString() },
+              createdAt: Date.now()
+            });
+            console.log('[Relevo] Guardado en cola offline.');
+          }
+        } else {
+          try {
+            const timeoutPromise = new Promise((_, rej) => setTimeout(() => rej(new Error('Timeout')), 6000));
+            const savePromise = db.collection("CUADERNO").add(relevoData);
+            await Promise.race([savePromise, timeoutPromise]);
+            console.log('[Relevo] Guardado online en Firestore.');
+          } catch (errSync) {
+            console.warn('Fallo guardado online relevo, encolando...', errSync);
+            if (window.OfflineQueue) {
+              await window.OfflineQueue.add({
+                kind: 'relevo-full',
+                collection: 'CUADERNO',
+                cliente: usuarioSalienteData.CLIENTE,
+                unidad: usuarioSalienteData.UNIDAD,
+                data: { ...relevoData, timestamp: new Date().toISOString() },
+                createdAt: Date.now()
+              });
+            }
+          }
+        }
 
         // Finalizar control del saliente
         const usuarioActualEmail = auth.currentUser?.email;
