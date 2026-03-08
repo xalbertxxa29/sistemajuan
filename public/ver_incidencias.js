@@ -201,6 +201,18 @@ document.addEventListener('DOMContentLoaded', () => {
     UX.show('Cargando incidencias…');
 
     try {
+      // 1. Intentar Caché Local primero (para carga instantánea de lo más reciente)
+      if (!direction && window.offlineStorage) {
+        const cachedData = await offlineStorage.getConfig('incidencias-hoy');
+        if (cachedData && cachedData.length > 0) {
+          console.log('[Incidencias] Cargando desde caché local.');
+          allLoadedData = cachedData;
+          render(cachedData.map(d => ({ data: () => d }))); // Mock doc interface
+          UX.hide();
+          // Continuar en background para refrescar desde Firestore
+        }
+      }
+
       let cursor = null;
       if (direction === 'next') cursor = lastDoc;
       if (direction === 'prev') {
@@ -216,7 +228,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const snap = await buildQuery(direction, cursor).get();
 
       if (snap.empty) {
-        render([]);
+        if (allLoadedData.length === 0) render([]);
         prevBtn.disabled = pageStack.length <= 1;
         nextBtn.disabled = true;
         UX.hide();
@@ -229,7 +241,11 @@ document.addEventListener('DOMContentLoaded', () => {
       if (direction !== 'prev') pageStack.push(first);
 
       // Add new data
-      snap.docs.forEach(d => allLoadedData.push(d.data()));
+      if (direction) {
+        snap.docs.forEach(d => allLoadedData.push(d.data()));
+      } else {
+        allLoadedData = snap.docs.map(d => d.data());
+      }
 
       render(snap.docs);
 
@@ -237,7 +253,9 @@ document.addEventListener('DOMContentLoaded', () => {
       nextBtn.disabled = snap.docs.length < PAGE_SIZE;
     } catch (e) {
       console.error('Error cargando incidencias:', e);
-      cont.innerHTML = `<p class="muted">No se pudieron cargar las incidencias.</p>`;
+      if (allLoadedData.length === 0) {
+        cont.innerHTML = `<p class="muted">No se pudieron cargar las incidencias.</p>`;
+      }
     } finally {
       UX.hide();
     }

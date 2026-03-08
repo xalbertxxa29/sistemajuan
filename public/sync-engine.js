@@ -15,6 +15,7 @@
             CONSIGNAS_TEMP: 'consignas-temp',
             ACCESO_PEATONAL_HOY: 'peatonal-hoy',
             ACCESO_VEHICULAR_HOY: 'vehicular-hoy',
+            INCIDENCIAS_HOY: 'incidencias-hoy',
             CATALOGOS_ACCESO: 'catalogos-acceso'
         },
 
@@ -60,14 +61,18 @@
                     consignasPerm,
                     consignasTemp,
                     peatonalHoy,
-                    vehicularHoy
+                    vehicularHoy,
+                    incidenciasHoy,
+                    catalogosAcceso
                 ] = await Promise.all([
                     this._fetchQRs(CLIENTE, UNIDAD),
                     this._fetchIncidentTypes(CLIENTE, UNIDAD),
                     this._fetchConsignas(CLIENTE, UNIDAD, 'CONSIGNA_PERMANENTE'),
                     this._fetchConsignas(CLIENTE, UNIDAD, 'CONSIGNA_TEMPORAL'),
                     this._fetchAccesosHoy(CLIENTE, UNIDAD, 'ACCESO_PEATONAL'),
-                    this._fetchAccesosHoy(CLIENTE, UNIDAD, 'ACCESO_VEHICULAR')
+                    this._fetchAccesosHoy(CLIENTE, UNIDAD, 'ACCESO_VEHICULAR'),
+                    this._fetchAccesosHoy(CLIENTE, UNIDAD, 'INCIDENCIAS_REGISTRADAS'),
+                    this._fetchCatalogosAcceso()
                 ]);
 
                 // 3. Guardar en Caché Local (IndexedDB)
@@ -78,13 +83,15 @@
                     offlineStorage.saveConfig(this.RESOURCES.CONSIGNAS_TEMP, consignasTemp),
                     offlineStorage.saveConfig(this.RESOURCES.ACCESO_PEATONAL_HOY, peatonalHoy),
                     offlineStorage.saveConfig(this.RESOURCES.ACCESO_VEHICULAR_HOY, vehicularHoy),
+                    offlineStorage.saveConfig(this.RESOURCES.INCIDENCIAS_HOY, incidenciasHoy),
+                    offlineStorage.saveConfig(this.RESOURCES.CATALOGOS_ACCESO, catalogosAcceso),
                     offlineStorage.setGlobalData(`sync-version-${CLIENTE}-${UNIDAD}`, serverVersion)
                 ]);
 
                 console.log(`[SyncEngine] 🎉 Sincronización completada.`);
                 console.log(`- QRs: ${qrs.length}, Incidencias: ${incidentTypes.length}`);
                 console.log(`- Consignas: ${consignasPerm.length}P / ${consignasTemp.length}T`);
-                console.log(`- Registros Hoy: ${peatonalHoy.length} Peat / ${vehicularHoy.length} Veh`);
+                console.log(`- Registros Hoy: ${peatonalHoy.length} Peat / ${vehicularHoy.length} Veh / ${incidenciasHoy.length} Inc`);
 
                 if (window.UI && UI.updateOfflineBadge) UI.updateOfflineBadge('done');
                 return true;
@@ -129,15 +136,29 @@
             // Nota: El filtrado exacto depende de los índices. Si falla, bajamos todo el histórico (no recomendado)
             // o simplemente limitamos a los últimos 50 registros para el "Hoy".
             try {
+                const isAcceso = coleccion === 'ACCESO_VEHICULAR' || coleccion === 'ACCESO_PEATONAL';
                 const snap = await db.collection(coleccion)
-                    .where(coleccion === 'ACCESO_VEHICULAR' ? 'cliente' : 'CLIENTE', '==', cliente.toUpperCase())
-                    .where(coleccion === 'ACCESO_VEHICULAR' ? 'unidad' : 'UNIDAD', '==', unidad.toUpperCase())
+                    .where(isAcceso ? (coleccion === 'ACCESO_VEHICULAR' ? 'cliente' : 'CLIENTE') : 'cliente', '==', cliente.toUpperCase())
+                    .where(isAcceso ? (coleccion === 'ACCESO_VEHICULAR' ? 'unidad' : 'UNIDAD') : 'unidad', '==', unidad.toUpperCase())
                     .orderBy(field, 'desc')
                     .limit(50)
                     .get();
                 return snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-            } catch (e) {
-                console.warn(`[SyncEngine] Falló fetch optimizado de ${coleccion}:`, e.message);
+            } catch (err) {
+                console.warn(`[Sync] Falló fetch optimizado para ${coleccion}:`, err.message);
+                return [];
+            }
+        },
+
+        async _fetchCatalogosAcceso() {
+            try {
+                // Descargamos la estructura básica de CLIENTE_UNIDAD para que el menú funcione offline
+                const snap = await db.collection('CLIENTE_UNIDAD').limit(20).get();
+                const catalogos = [];
+                snap.forEach(doc => catalogos.push({ id: doc.id, ...doc.data() }));
+                return catalogos;
+            } catch (err) {
+                console.warn('[Sync] Falló fetch de catálogos:', err.message);
                 return [];
             }
         }

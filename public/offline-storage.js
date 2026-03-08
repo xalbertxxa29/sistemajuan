@@ -27,7 +27,7 @@ class OfflineStorage {
   // Abrir/crear IndexedDB
   openDB() {
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open(this.DB_NAME, 1);
+      const request = indexedDB.open(this.DB_NAME, 2);
 
       request.onupgradeneeded = (event) => {
         const db = event.target.result;

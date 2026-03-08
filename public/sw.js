@@ -1,4 +1,4 @@
-﻿const V = 'v81';
+﻿const V = 'v82';
 const PRECACHE = `precache-${V}`;
 const RUNTIME = `runtime-${V}`;
 
@@ -27,7 +27,7 @@ const PRECACHE_URLS = [
   './offline-storage.js',
   './offline-queue.js',
   './sync.js',
-  './offline-sync.js',
+  './sync-engine.js',
   './ronda-sync.js',
   './report-service.js',
 

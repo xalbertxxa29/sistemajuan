@@ -1023,17 +1023,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   // ===================== INICIAR VIDEO QR =====================
   async function iniciarVideoQR(indice, punto, modal) {
     try {
-      const video = modal.querySelector('#scanner-video');
+      const video = modal.querySelector('video');
 
-      // Detener cualquier lector anterior limpiamente ANTES de pedir cámara de nuevo
-      if (codeReaderInstance) {
-        try {
-          codeReaderInstance.reset();
-        } catch (e) { console.warn('Error reseteando zxing', e); }
-      }
+      // 1. Limpieza previa total
+      detenerVideoQR(modal);
 
-      // IMPORTANTE: ZXing manejará el getUserMedia si le pasamos null como deviceId.
-      // Así evitamos conflictos de "Stream ya en uso".
+      // 2. Nueva instancia
       const codeReader = new ZXing.BrowserMultiFormatReader();
       codeReaderInstance = codeReader;
 
@@ -1042,11 +1037,17 @@ document.addEventListener('DOMContentLoaded', async () => {
       let selectedDeviceId = videoInputDevices.length > 0 ? videoInputDevices[0].deviceId : null;
 
       if (videoInputDevices.length > 1) {
-        const backCamera = videoInputDevices.find(device => device.label.toLowerCase().includes('back') || device.label.toLowerCase().includes('trasera') || device.label.toLowerCase().includes('environment'));
+        const backCamera = videoInputDevices.find(device =>
+          device.label.toLowerCase().includes('back') ||
+          device.label.toLowerCase().includes('trasera') ||
+          device.label.toLowerCase().includes('environment')
+        );
         if (backCamera) {
           selectedDeviceId = backCamera.deviceId;
         }
       }
+
+      console.log('[Scanner Programado] Usando cámara ID:', selectedDeviceId);
 
       codeReader.decodeFromVideoDevice(selectedDeviceId, video, (result, err) => {
         if (result && scannerActivo) {
@@ -1142,13 +1143,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     errorBox.querySelector('#retry-qr').addEventListener('click', () => {
       errorOverlay.remove();
-      scannerActivo = false;
       // Reiniciar video del scanner
       if (modal && modal.parentNode) {
-        const video = modal.querySelector('#scanner-video');
-        if (video && video.srcObject) {
-          video.srcObject.getTracks().forEach(track => track.stop());
-        }
         iniciarVideoQR(indice, punto, modal);
       }
     });
@@ -1157,14 +1153,20 @@ document.addEventListener('DOMContentLoaded', async () => {
   // ===================== DETENER VIDEO QR =====================
   function detenerVideoQR(modal) {
     if (!modal) return;
-    const video = modal.querySelector('#scanner-video');
+    const video = modal.querySelector('video'); // Busca cualquier video (manual o programado)
     if (video && video.srcObject) {
-      video.srcObject.getTracks().forEach(track => track.stop());
+      video.srcObject.getTracks().forEach(track => {
+        track.stop();
+        console.log('[Scanner] Track detenido:', track.label);
+      });
+      video.srcObject = null;
     }
     if (codeReaderInstance) {
       try {
         codeReaderInstance.reset();
+        console.log('[Scanner] ZXing Reseteado');
       } catch (e) { }
+      codeReaderInstance = null;
     }
   }
 
@@ -1880,18 +1882,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   // ===================== INICIAR VIDEO QR PARA RONDA MANUAL =====================
   async function iniciarVideoQRManual(modal) {
     try {
-      const video = modal.querySelector('#manual-scanner-video');
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-      video.srcObject = stream;
-      // NO llamar a video.play() - ZXing lo maneja automáticamente
+      const video = modal.querySelector('video');
 
-      // Detener cualquier lector anterior
-      if (codeReaderInstance) {
-        try {
-          codeReaderInstance.reset();
-        } catch (e) { }
-      }
+      // 1. Limpieza previa total
+      detenerVideoQR(modal);
 
+      // 2. Nueva instancia
       const codeReader = new ZXing.BrowserMultiFormatReader();
       codeReaderInstance = codeReader;
 
@@ -1899,14 +1895,21 @@ document.addEventListener('DOMContentLoaded', async () => {
       let selectedDeviceId = videoInputDevices.length > 0 ? videoInputDevices[0].deviceId : null;
 
       if (videoInputDevices.length > 1) {
-        const backCamera = videoInputDevices.find(device => device.label.toLowerCase().includes('back') || device.label.toLowerCase().includes('trasera') || device.label.toLowerCase().includes('environment'));
+        const backCamera = videoInputDevices.find(device =>
+          device.label.toLowerCase().includes('back') ||
+          device.label.toLowerCase().includes('trasera') ||
+          device.label.toLowerCase().includes('environment')
+        );
         if (backCamera) {
           selectedDeviceId = backCamera.deviceId;
         }
       }
 
+      console.log('[Scanner Manual] Usando cámara ID:', selectedDeviceId);
+
+      // 3. Iniciar escaneo (ZXing maneja el stream automáticamente)
       codeReader.decodeFromVideoDevice(selectedDeviceId, video, (result, err) => {
-        if (result) {
+        if (result && scannerActivo) {
           procesarQRManual(result.getText(), modal);
         }
       });
@@ -2093,13 +2096,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     errorBox.querySelector('#retry-qr-manual').addEventListener('click', () => {
       errorOverlay.remove();
-      scannerActivo = false;
-      // Reiniciar video del scanner
+      // Reiniciar video del scanner limpiando todo primero
       if (modal && modal.parentNode) {
-        const video = modal.querySelector('#manual-scanner-video');
-        if (video && video.srcObject) {
-          video.srcObject.getTracks().forEach(track => track.stop());
-        }
         iniciarVideoQRManual(modal);
       }
     });
