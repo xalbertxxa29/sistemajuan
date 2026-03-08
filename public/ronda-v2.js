@@ -2508,7 +2508,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (cachedQrs && cachedQrs.length > 0) {
           console.log('[Ronda] Cargando QRs desde caché incremental.');
           puntosRonda = cachedQrs;
-          renderizarPuntosControl();
+
+          // Refrescar UI según estado
+          if (rondaEnProgreso) {
+            mostrarRondaEnProgreso();
+          } else {
+            cargarRondas();
+          }
           return;
         }
       }
@@ -2527,7 +2533,11 @@ document.addEventListener('DOMContentLoaded', async () => {
           puntosRonda.push({ id: doc.id, ...d });
         }
       });
-      mostrarRondaEnProgreso();
+      if (rondaEnProgreso) {
+        mostrarRondaEnProgreso();
+      } else {
+        cargarRondas();
+      }
     } catch (e) {
       console.error('Error cargando configuración:', e);
     }

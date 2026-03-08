@@ -26,61 +26,26 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     currentUser = user;
+    const userId = user.email.split('@')[0];
     userCtx.email = user.email;
     userCtx.uid = user.uid;
 
-    // Obtener datos del usuario desde offline storage primero
     try {
-      if (window.OfflineStorage) {
-        const userData = await window.OfflineStorage.getUserData();
-        if (userData && userData.cliente && userData.unidad && userData.puesto) {
-          userCtx.cliente = userData.cliente;
-          userCtx.unidad = userData.unidad;
-          userCtx.puesto = userData.puesto;
-          console.log('✓ Datos del usuario obtenidos de OfflineStorage');
-          return;
-        }
-      }
-    } catch (e) {
-      console.warn('No se pudo cargar datos de OfflineStorage:', e.message);
-    }
+      // 🛡️ Usar caché global (Zero-Read)
+      const userData = await window.getUserProfile(userId);
 
-    // Si no están en offline storage, obtener de Firestore
-    try {
-      const userId = user.email.split('@')[0];
-      const snap = await db.collection('USUARIOS').doc(userId).get();
-
-      if (snap.exists) {
-        const datos = snap.data();
-        userCtx.cliente = datos.CLIENTE || datos.cliente || '';
-        userCtx.unidad = datos.UNIDAD || datos.unidad || '';
-        userCtx.puesto = datos.PUESTO || datos.puesto || '';
+      if (userData) {
+        userCtx.cliente = userData.CLIENTE || userData.cliente || '';
+        userCtx.unidad = userData.UNIDAD || userData.unidad || '';
+        userCtx.puesto = userData.PUESTO || userData.puesto || '';
         // v73: Guardar nombre completo
-        userCtx.nombreCompleto = `${datos.NOMBRES || ''} ${datos.APELLIDOS || ''}`.trim().toUpperCase();
-
-        console.log('✓ Datos del usuario obtenidos de Firestore', userCtx);
-
-        // Guardar en offline storage para próxima vez
-        if (window.OfflineStorage && userCtx.cliente && userCtx.unidad) {
-          try {
-            await window.OfflineStorage.setUserData({
-              email: user.email,
-              userId: userId,
-              nombres: datos.NOMBRES || datos.nombres || '',
-              apellidos: datos.APELLIDOS || datos.apellidos || '',
-              cliente: userCtx.cliente,
-              unidad: userCtx.unidad,
-              puesto: userCtx.puesto
-            });
-          } catch (e) {
-            console.warn('No se pudo guardar en OfflineStorage:', e.message);
-          }
-        }
+        userCtx.nombreCompleto = `${userData.NOMBRES || userData.nombres || ''} ${userData.APELLIDOS || userData.apellidos || ''}`.trim().toUpperCase();
+        console.log('✓ Datos del usuario obtenidos del caché global');
       } else {
-        console.warn('Perfil de usuario no encontrado en Firestore');
+        console.warn('Perfil de usuario no encontrado en caché ni red');
       }
     } catch (e) {
-      console.error('Error obteniendo datos del usuario:', e);
+      console.error('[vehicular] Error cargando perfil:', e);
     }
   });
 

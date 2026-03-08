@@ -40,6 +40,17 @@
             try {
                 if (window.UI && UI.updateOfflineBadge) UI.updateOfflineBadge('syncing');
 
+                // --- NUEVO: THROTTLE POR TIEMPO (10 MINUTOS) ---
+                const SYNC_THROTTLE_MS = 10 * 60 * 1000; // 10 minutos
+                const lastCheck = await offlineStorage.getGlobalData(`last-sync-check-${CLIENTE}-${UNIDAD}`);
+                const now = Date.now();
+
+                if (!force && lastCheck && (now - lastCheck < SYNC_THROTTLE_MS)) {
+                    console.log(`[SyncEngine] ⏳ Sincronización omitida (última hace ${Math.round((now - lastCheck) / 1000)}s).`);
+                    if (window.UI && UI.updateOfflineBadge) UI.updateOfflineBadge('done');
+                    return true;
+                }
+
                 // 1. Verificar Metadatos de Versión
                 const metaPath = `CONFIG_METADATA/${CLIENTE}_${UNIDAD}`;
                 const metaDoc = await db.doc(metaPath).get().catch(() => null);
@@ -48,6 +59,8 @@
 
                 if (!force && localVersion && localVersion >= serverVersion) {
                     console.log('[SyncEngine] ✅ Configuración actualizada. No se requiere descarga.');
+                    // Actualizamos el last-check incluso si no hubo descarga porque confirmamos que estamos al día
+                    await offlineStorage.setGlobalData(`last-sync-check-${CLIENTE}-${UNIDAD}`, now);
                     if (window.UI && UI.updateOfflineBadge) UI.updateOfflineBadge('done');
                     return true;
                 }
@@ -85,7 +98,8 @@
                     offlineStorage.saveConfig(this.RESOURCES.ACCESO_VEHICULAR_HOY, vehicularHoy),
                     offlineStorage.saveConfig(this.RESOURCES.INCIDENCIAS_HOY, incidenciasHoy),
                     offlineStorage.saveConfig(this.RESOURCES.CATALOGOS_ACCESO, catalogosAcceso),
-                    offlineStorage.setGlobalData(`sync-version-${CLIENTE}-${UNIDAD}`, serverVersion)
+                    offlineStorage.setGlobalData(`sync-version-${CLIENTE}-${UNIDAD}`, serverVersion),
+                    offlineStorage.setGlobalData(`last-sync-check-${CLIENTE}-${UNIDAD}`, Date.now())
                 ]);
 
                 console.log(`[SyncEngine] 🎉 Sincronización completada.`);

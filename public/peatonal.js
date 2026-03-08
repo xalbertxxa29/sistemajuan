@@ -22,36 +22,24 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!user) { window.location.href = 'index.html'; return; }
     try {
       const id = user.email.split('@')[0];
-      const snap = await db.collection('USUARIOS').doc(id).get();
-      if (snap.exists) {
-        const d = snap.data();
+
+      // 🛡️ Usar caché global (Zero-Read)
+      const userData = await window.getUserProfile(id);
+
+      if (userData) {
         userCtx = {
           id,
-          cliente: d.CLIENTE || '',
-          unidad: d.UNIDAD || '',
+          cliente: userData.CLIENTE || userData.cliente || '',
+          unidad: userData.UNIDAD || userData.unidad || '',
           // v73: Guardar nombre completo
-          nombreCompleto: `${d.NOMBRES || ''} ${d.APELLIDOS || ''}`.trim().toUpperCase()
+          nombreCompleto: `${userData.NOMBRES || userData.nombres || ''} ${userData.APELLIDOS || userData.apellidos || ''}`.trim().toUpperCase()
         };
       } else {
         userCtx = { id, cliente: '', unidad: '', nombreCompleto: id };
       }
     } catch (e) {
-      console.error(e);
-      // Fallback offline
-      if (window.offlineStorage) {
-        try {
-          const u = await window.offlineStorage.getUserData();
-          if (u && u.id === id) {
-            userCtx = {
-              id,
-              cliente: u.CLIENTE || '',
-              unidad: u.UNIDAD || '',
-              nombreCompleto: `${u.NOMBRES || ''} ${u.APELLIDOS || ''}`.trim().toUpperCase()
-            };
-            return;
-          }
-        } catch (ex) { console.warn(ex); }
-      }
+      console.error('[peatonal] Error cargando perfil:', e);
+      userCtx = { id: user.email.split('@')[0], cliente: '', unidad: '', nombreCompleto: user.email.split('@')[0] };
     }
   });
 
