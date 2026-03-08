@@ -1,4 +1,4 @@
-// initFirebase.js (v69) — Firebase compat + offline robusto para WebView
+// initFirebase.js (v70) — Saneamiento de caché house
 // - Protección contra reinicialización múltiple
 // - Persistencia Firestore con synchronizeTabs
 // - Ajustes WebView (long polling) y undefined props
@@ -75,8 +75,21 @@ if (!window.__FIREBASE_INITIALIZED__) {
         try {
           const cached = await window.offlineStorage.getUserData();
           if (cached && cached.userId === userId) {
-            window.userProfileCache = { ...cached, id: userId, CLIENTE: cached.cliente, UNIDAD: cached.unidad, PUESTO: cached.puesto };
-            return window.userProfileCache;
+            // SANEAMIENTO: Si no hay nombres, forzar recarga desde Firestore
+            if (cached.nombres || cached.NOMBRES) {
+              window.userProfileCache = {
+                ...cached,
+                id: userId,
+                CLIENTE: cached.cliente,
+                UNIDAD: cached.unidad,
+                PUESTO: cached.puesto,
+                NOMBRES: cached.nombres,
+                APELLIDOS: cached.apellidos
+              };
+              return window.userProfileCache;
+            } else {
+              console.warn('[cache] Perfil corrupto detectado (sin nombres). Reintentando Firestore...');
+            }
           }
         } catch (e) { console.warn('[cache] Error leyendo offlineStorage:', e); }
       }

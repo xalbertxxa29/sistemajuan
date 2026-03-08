@@ -128,6 +128,8 @@
                     offlineStorage.setUserData({
                         email: userProfile.email || '',
                         userId: (userProfile.email || '').split('@')[0],
+                        nombres: userProfile.NOMBRES || userProfile.nombres || '',
+                        apellidos: userProfile.APELLIDOS || userProfile.apellidos || '',
                         cliente: CLIENTE,
                         unidad: UNIDAD,
                         puesto: userProfile.PUESTO || userProfile.puesto || ''

@@ -1,4 +1,4 @@
-// menu.js (v69) — Relevo funcional, cambio de sesión sin redirigir al login
+// menu.js (v70) — Relevo funcional, saneamiento de perfil house
 document.addEventListener("DOMContentLoaded", () => {
   try {
     // Solo inicializar si aún no lo hemos hecho
@@ -119,15 +119,30 @@ document.addEventListener("DOMContentLoaded", () => {
         // Actualizar UI con su nombre y unidad
         const nameEl = $("#user-details");
         const unitEl = $("#user-client-unit");
-        const userDataRaw = userData || {};
-        const nom = userDataRaw.NOMBRES || userDataRaw.nombres || '';
-        const ape = userDataRaw.APELLIDOS || userDataRaw.apellidos || '';
+        let userDataRaw = userData || {};
+
+        let nom = userDataRaw.NOMBRES || userDataRaw.nombres || '';
+        let ape = userDataRaw.APELLIDOS || userDataRaw.apellidos || '';
+
+        // --- REFUERZO FINAL: Si el nombre está vacío y hay red, forzar lectura de Firestore ---
+        if (!nom.trim() && navigator.onLine) {
+          console.warn('[menu] Nombre vacío detectado, intentando recuperación directa de Firestore...');
+          const fixDoc = await db.collection("USUARIOS").doc(userId).get().catch(() => null);
+          if (fixDoc && fixDoc.exists) {
+            const fixData = fixDoc.data();
+            nom = fixData.NOMBRES || fixData.nombres || '';
+            ape = fixData.APELLIDOS || fixData.apellidos || '';
+            userDataRaw = { ...userDataRaw, ...fixData };
+            console.log('[menu] ✓ Nombre recuperado exitosamente.');
+          }
+        }
+
         const fullname = `${nom} ${ape}`.trim();
         nameEl.textContent = fullname || userId;
         unitEl.textContent = `${userDataRaw.CLIENTE || userDataRaw.cliente || ''} - ${userDataRaw.UNIDAD || userDataRaw.unidad || ''} - ${userDataRaw.PUESTO || userDataRaw.puesto || ''}`;
 
-        // 💾 5. GUARDAR / REFRESCAR CACHE LOCAL DEL PERFIL
-        if (typeof offlineStorage !== 'undefined') {
+        // 💾 5. GUARDAR / REFRESCAR CACHE LOCAL DEL PERFIL (Solo si tiene datos válidos)
+        if (typeof offlineStorage !== 'undefined' && nom.trim()) {
           await offlineStorage.setUserData({
             email: user.email,
             userId: userId,
