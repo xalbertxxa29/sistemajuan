@@ -496,6 +496,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const startOfDay = new Date();
       startOfDay.setHours(0, 0, 0, 0);
 
+      // 1. CONSULTAR FIRESTORE (Datos del Servidor/Caché SDK)
       try {
         const timeoutPromise = new Promise((resolve) => setTimeout(() => resolve('TIMEOUT'), 3000));
         const fetchHistory = db.collection('RONDAS_COMPLETADAS')
@@ -530,6 +531,56 @@ document.addEventListener('DOMContentLoaded', async () => {
       } catch (errHist) {
         console.warn('[Ronda] No se pudo verificar historial:', errHist);
       }
+
+      // 2. 🚀 INYECTAR DATOS DE LA COLA OFFLINE (Prioridad sobre Server si es más reciente)
+      if (window.OfflineQueue) {
+        try {
+          const tasks = await window.OfflineQueue.all();
+          tasks.forEach(t => {
+            // Si hay un inicio de ronda en cola para hoy
+            if (t.kind === 'ronda-start' && t.data && t.data.rondaId) {
+              const rId = t.data.rondaId;
+              // Si no está en Firestore o si Firestore dice algo distinto, mandamos nosotros
+              if (!statusMap[rId] || statusMap[rId].estado !== 'EN_PROGRESO') {
+                statusMap[rId] = {
+                  estado: 'EN_PROGRESO',
+                  docId: t.docId,
+                  data: t.data,
+                  isOfflinePending: true
+                };
+              }
+            }
+            // Si hay puntos marcados en cola
+            if (t.kind === 'ronda-programada-point' && t.docId) {
+              // Buscar a qué ronda pertenece este punto por docId
+              for (const rId in statusMap) {
+                if (statusMap[rId].docId === t.docId) {
+                  const currentData = statusMap[rId].data;
+                  if (!currentData.puntosRegistrados) currentData.puntosRegistrados = {};
+                  // Inyectar el punto de la cola en el mapa de estados
+                  currentData.puntosRegistrados[t.index] = {
+                    ...t.data,
+                    isOfflinePending: true
+                  };
+                  // Si el servidor decía que no estaba en progreso (raro), lo forzamos
+                  statusMap[rId].estado = 'EN_PROGRESO';
+                }
+              }
+            }
+            // Si hay un fin de ronda en cola
+            if (t.kind === 'ronda-programada-end' && t.docId) {
+              for (const rId in statusMap) {
+                if (statusMap[rId].docId === t.docId) {
+                  statusMap[rId].estado = t.data.estado || 'TERMINADA';
+                }
+              }
+            }
+          });
+        } catch (e) {
+          console.warn('[Ronda] Error mezclando cola offline:', e);
+        }
+      }
+
       return statusMap;
     }
 
@@ -949,7 +1000,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             docId: docId,
             cliente: userCtx.cliente,
             unidad: userCtx.unidad,
-            data: { ...rondaEnProgreso, horarioInicio: new Date().toISOString() },
+            data: {
+              ...rondaEnProgreso,
+              horarioInicio: firebase.firestore.Timestamp.now(), // Usar Timestamp para compatibilidad
+              isOffline: true
+            },
             createdAt: Date.now()
           });
           console.log('[Ronda] Inicio encolado offline.');
@@ -969,7 +1024,11 @@ document.addEventListener('DOMContentLoaded', async () => {
               docId: docId,
               cliente: userCtx.cliente,
               unidad: userCtx.unidad,
-              data: { ...rondaEnProgreso, horarioInicio: new Date().toISOString() },
+              data: {
+                ...rondaEnProgreso,
+                horarioInicio: firebase.firestore.Timestamp.now(),
+                isOffline: true
+              },
               createdAt: Date.now()
             });
           }

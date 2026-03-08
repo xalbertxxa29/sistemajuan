@@ -182,6 +182,12 @@
               console.log(`[sync] ✅ Ronda programada terminada: ${t.docId}`);
             } else if (t.kind === 'ronda-programada-point' && t.docId && t.index !== undefined) {
               const updateKey = `puntosRegistrados.${t.index}`;
+
+              // Asegurar que el timestamp del punto sea un objeto Timestamp
+              if (payload.timestamp && typeof payload.timestamp === 'string') {
+                payload.timestamp = firebase.firestore.Timestamp.fromDate(new Date(payload.timestamp));
+              }
+
               const updateData = {
                 [updateKey]: payload,
                 ultimaActualizacion: firebase.firestore.FieldValue.serverTimestamp()
