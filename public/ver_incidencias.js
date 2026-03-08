@@ -31,6 +31,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let perfil = null;            // { CLIENTE, UNIDAD }
   let lastDoc = null;           // cursor para "siguiente"
   let pageStack = [];           // pila de primeros docs por página para retroceder
+  let unsubscribeLive = null;   // Listener en tiempo real
 
   // ---------- Sesión ----------
   auth.onAuthStateChanged(async (user) => {
@@ -87,6 +88,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Filtra por CLIENTE y UNIDAD para seguridad, igual que en registros.js
     // Muestra todas las incidencias de esa unidad.
+    const limit = (!fechaInput.value && !direction && !cursor) ? 2 : PAGE_SIZE;
+
     if (fechaInput.value) {
       const [start, end] = startEndOfDay(fechaInput.value);
       ref = db.collection('INCIDENCIAS_REGISTRADAS')
@@ -95,13 +98,13 @@ document.addEventListener('DOMContentLoaded', () => {
         .where('timestamp', '>=', start)
         .where('timestamp', '<=', end)
         .orderBy('timestamp', 'desc')
-        .limit(PAGE_SIZE);
+        .limit(limit);
     } else {
       ref = db.collection('INCIDENCIAS_REGISTRADAS')
         .where('cliente', '==', CLIENTE)
         .where('unidad', '==', UNIDAD)
         .orderBy('timestamp', 'desc')
-        .limit(PAGE_SIZE);
+        .limit(limit);
     }
 
     if (direction === 'next' && cursor) ref = ref.startAfter(cursor);
@@ -110,7 +113,17 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function resolveRegistradoPor(d) {
-    return d.registradoPor || d.REGISTRADO_POR || '—';
+    if (d.registradoPor) {
+      if (typeof d.registradoPor === 'string') return d.registradoPor;
+      if (d.registradoPor.nombre) return d.registradoPor.nombre;
+    }
+    if (d.usuario) return d.usuario;
+    if (d.REGISTRADO_POR || d.registrado_por) return d.REGISTRADO_POR || d.registrado_por;
+    if (d.nombres || d.apellidos) return `${d.nombres || ''} ${d.apellidos || ''}`.trim();
+    if (d.usuarioEmail) return d.usuarioEmail;
+    if (d.usuarioID) return d.usuarioID;
+    if (d.uploadedBy) return d.uploadedBy;
+    return '—';
   }
 
   function onlyPhotoHTML(data) {
@@ -201,16 +214,52 @@ document.addEventListener('DOMContentLoaded', () => {
     UX.show('Cargando incidencias…');
 
     try {
-      // 1. Intentar Caché Local primero (para carga instantánea de lo más reciente)
-      if (!direction && window.offlineStorage) {
-        const cachedData = await offlineStorage.getConfig('incidencias-hoy');
-        if (cachedData && cachedData.length > 0) {
-          console.log('[Incidencias] Cargando desde caché local.');
-          allLoadedData = cachedData;
-          render(cachedData.map(d => ({ data: () => d }))); // Mock doc interface
+      // 1. Carga Instantánea desde Caché Local (Zero-Read load)
+      if (!direction && !fechaInput.value && window.offlineStorage) {
+        const cached = await offlineStorage.getConfig('incidencias-hoy');
+        if (cached && cached.length > 0) {
+          console.log('[Incidencias] Carga instantánea desde caché.');
+          render(cached.slice(0, 2).map(d => ({ data: () => d })));
           UX.hide();
-          // Continuar en background para refrescar desde Firestore
         }
+      }
+
+      // 2. Listeners en Tiempo Real + Persistencia Proactiva
+      if (!direction && !fechaInput.value) {
+        if (unsubscribeLive) unsubscribeLive();
+
+        UX.show('Sincronizando tiempo real...');
+        unsubscribeLive = db.collection('INCIDENCIAS_REGISTRADAS')
+          .where('cliente', '==', perfil.CLIENTE)
+          .where('unidad', '==', perfil.UNIDAD)
+          .orderBy('timestamp', 'desc')
+          .limit(2)
+          .onSnapshot(snap => {
+            console.log('[Incidencias] Actualización en tiempo real recibida.');
+            const docs = snap.docs;
+            render(docs);
+
+            // Persistir estas actualizaciones para la carga Zero-Read inicial
+            if (window.offlineStorage && !snap.empty) {
+              const dataArray = docs.map(d => ({ id: d.id, ...d.data() }));
+              offlineStorage.saveConfig('incidencias-hoy', dataArray);
+            }
+
+            if (!snap.empty) {
+              lastDoc = docs[docs.length - 1];
+            }
+            UX.hide();
+          }, err => {
+            console.error('[Incidencias] Error en listener:', err);
+            UX.hide();
+          });
+        return;
+      }
+
+      // Si hay filtro o dirección, cancelar listener live
+      if (unsubscribeLive) {
+        unsubscribeLive();
+        unsubscribeLive = null;
       }
 
       let cursor = null;

@@ -186,6 +186,40 @@ class OfflineStorage {
   }
 
   /**
+   * Fusiona nuevos datos con los existentes (evita duplicados por id)
+   */
+  async mergeConfig(key, newData) {
+    if (!newData || !newData.length) return true;
+    try {
+      const existing = await this.getConfig(key) || [];
+      const existingIds = new Set(existing.map(x => x.id || JSON.stringify(x)));
+      const filteredNew = newData.filter(x => !existingIds.has(x.id || JSON.stringify(x)));
+
+      if (filteredNew.length === 0) return true;
+
+      const getMillis = (v) => {
+        if (!v) return 0;
+        if (v.toMillis) return v.toMillis();
+        if (v.seconds) return v.seconds * 1000 + (v.nanoseconds / 1000000);
+        if (v instanceof Date) return v.getTime();
+        const d = new Date(v);
+        return isNaN(d) ? 0 : d.getTime();
+      };
+
+      const merged = [...filteredNew, ...existing].sort((a, b) => {
+        const ta = a.timestamp || a.createdAt || a.horarioInicio || a.FECHA_INGRESO || 0;
+        const tb = b.timestamp || b.createdAt || b.horarioInicio || b.FECHA_INGRESO || 0;
+        return getMillis(tb) - getMillis(ta);
+      }).slice(0, 100); // Mantener un pool razonable
+
+      return await this.saveConfig(key, merged);
+    } catch (e) {
+      console.error(`[OfflineStorage] Error fusionando config ${key}:`, e);
+      return false;
+    }
+  }
+
+  /**
    * Recupera un catálogo de la base de datos local
    */
   async getConfig(key) {

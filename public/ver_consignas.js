@@ -191,7 +191,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // 3. Fallback a Firestore (Solo si no hay cache o falló)
       if (all.length === 0 && navigator.onLine) {
-        const query = (col) => db.collection(col).where('cliente', '==', CLIENTE).where('unidad', '==', UNIDAD).get();
+        // En consignas, el usuario no tiene filtro de fecha en la UI, 
+        // pero queremos que la carga inicial sea ligera.
+        const query = (col) => db.collection(col)
+          .where('cliente', '==', CLIENTE)
+          .where('unidad', '==', UNIDAD)
+          .orderBy('timestamp', 'desc')
+          .limit(2)
+          .get();
         const [permsSnap, tempsSnap] = await Promise.all([query('CONSIGNA_PERMANENTE'), query('CONSIGNA_TEMPORAL')]);
 
         const permanentes = permsSnap.docs.map(d => {

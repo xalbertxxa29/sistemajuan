@@ -438,6 +438,12 @@ document.addEventListener('DOMContentLoaded', () => {
       const stamp = Date.now();
       console.log('[SUBMIT] Timestamp:', stamp);
 
+      const nom = currentUserProfile.NOMBRES || currentUserProfile.nombres || '';
+      const ape = currentUserProfile.APELLIDOS || currentUserProfile.apellidos || '';
+      const nombreCompleto = `${nom} ${ape}`.trim() || 'Usuario';
+      const usuarioID = auth.currentUser?.email?.split('@')[0] || currentUserProfile.id || 'N/A';
+      const usuarioEmail = auth.currentUser?.email || 'N/A';
+
       let fotoURL = null, fotoEmbedded = null;
       if (pendingPhoto) {
         console.log('[SUBMIT] 📸 Foto pendiente detectada, tamaño:', pendingPhoto.size, 'bytes');
@@ -459,7 +465,9 @@ document.addEventListener('DOMContentLoaded', () => {
         cliente: CLIENTE,
         unidad: UNIDAD,
         puesto: PUESTO || null,
-        registradoPor: `${NOMBRES || ''} ${APELLIDOS || ''}`.trim(),
+        registradoPor: nombreCompleto,
+        usuarioID: usuarioID,
+        usuarioEmail: usuarioEmail,
         tipoIncidente,
         detalleIncidente,
         Nivelderiesgo: nivelRiesgo,

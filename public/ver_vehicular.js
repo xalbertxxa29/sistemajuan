@@ -31,6 +31,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let perfil = null;            // { CLIENTE, UNIDAD }
     let lastDoc = null;           // cursor para "siguiente"
     let pageStack = [];           // pila de primeros docs por página para retroceder
+    let unsubscribeLive = null;   // Listener en tiempo real
 
     // ---------- Sesión ----------
     auth.onAuthStateChanged(async (user) => {
@@ -98,7 +99,9 @@ document.addEventListener('DOMContentLoaded', () => {
             ref = ref.orderBy('timestamp', 'desc');
         }
 
-        ref = ref.limit(PAGE_SIZE);
+        // Límite dinámico
+        const finalLimit = (!fechaInput.value && !direction && !cursor) ? 2 : PAGE_SIZE;
+        ref = ref.limit(finalLimit);
 
         if (direction === 'next' && cursor) ref = ref.startAfter(cursor);
         if (direction === 'prev' && cursor) ref = ref.endBefore(cursor).limitToLast(PAGE_SIZE);
@@ -210,15 +213,49 @@ document.addEventListener('DOMContentLoaded', () => {
         UX.show('Cargando historial vehicular…');
 
         try {
-            // 1. Intentar Carga desde Cache
-            if (!direction && window.offlineStorage) {
-                const cached = await window.offlineStorage.getConfig('vehicular-hoy');
+            // 1. Carga Instantánea desde Caché Local (Zero-Read load)
+            if (!direction && !fechaInput.value && window.offlineStorage) {
+                const cached = await offlineStorage.getConfig('acceso-vehicular-hoy');
                 if (cached && cached.length > 0) {
-                    console.log('[ver_vehicular] Cargando desde cache local (HOY).');
-                    allLoadedData = cached;
-                    renderData(cached);
-                    if (!navigator.onLine) { UX.hide(); return; }
+                    console.log('[ver_vehicular] Carga instantánea desde caché (Zero-Read).');
+                    renderData(cached.slice(0, 2));
+                    UX.hide();
                 }
+            }
+
+            // 2. Listeners en Tiempo Real + Persistencia Proactiva
+            if (!direction && !fechaInput.value) {
+                if (unsubscribeLive) unsubscribeLive();
+
+                UX.show('Sincronizando vehicular...');
+                unsubscribeLive = db.collection('ACCESO_VEHICULAR')
+                    .where('cliente', '==', perfil.CLIENTE)
+                    .where('unidad', '==', perfil.UNIDAD)
+                    .orderBy('timestamp', 'desc')
+                    .limit(2)
+                    .onSnapshot(snap => {
+                        console.log('[Vehicular] Update live recibido');
+                        const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+                        renderData(data);
+
+                        // Persistir en caché local
+                        if (window.offlineStorage && !snap.empty) {
+                            offlineStorage.saveConfig('acceso-vehicular-hoy', data);
+                        }
+
+                        if (!snap.empty) lastDoc = snap.docs[snap.docs.length - 1];
+                        UX.hide();
+                    }, err => {
+                        console.error('[Vehicular] Error live:', err);
+                        UX.hide();
+                    });
+                return;
+            }
+
+            // Cancelar live si hay filtro
+            if (unsubscribeLive) {
+                unsubscribeLive();
+                unsubscribeLive = null;
             }
 
             let cursor = null;

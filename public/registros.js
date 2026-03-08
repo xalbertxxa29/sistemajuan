@@ -32,6 +32,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let perfil = null;            // { CLIENTE, UNIDAD }
   let lastDoc = null;           // cursor para "siguiente"
   let pageStack = [];           // pila de primeros docs por página para retroceder
+  let unsubscribeLive = null;   // Listener en tiempo real
   let currentDataById = {};     // mapa id -> data para reportes
 
   // ---------- Sesión ----------
@@ -75,6 +76,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const { CLIENTE, UNIDAD } = perfil;
     let ref;
 
+    const limit = (!fechaInput.value && !direction && !cursor) ? 2 : PAGE_SIZE;
+
     if (fechaInput.value) {
       const [start, end] = startEndOfDay(fechaInput.value);
       ref = db.collection('CUADERNO')
@@ -83,13 +86,13 @@ document.addEventListener('DOMContentLoaded', () => {
         .where('timestamp', '>=', start)
         .where('timestamp', '<=', end)
         .orderBy('timestamp', 'desc')
-        .limit(PAGE_SIZE);
+        .limit(limit);
     } else {
       ref = db.collection('CUADERNO')
         .where('cliente', '==', CLIENTE)
         .where('unidad', '==', UNIDAD)
         .orderBy('timestamp', 'desc')
-        .limit(PAGE_SIZE);
+        .limit(limit);
     }
 
     if (direction === 'next' && cursor) ref = ref.startAfter(cursor);
@@ -201,19 +204,50 @@ document.addEventListener('DOMContentLoaded', () => {
     UX.show('Cargando registros…');
 
     try {
-      // --- NUEVO: Estrategia Cache-First para "Cache Everything" ---
-      if (!direction && window.offlineStorage) {
-        const cached = await window.offlineStorage.getConfig('cuaderno-hoy');
-        if (cached && Array.isArray(cached) && cached.length > 0) {
-          console.log('[registros] 📦 Usando datos de caché (cuaderno-hoy)');
-          // Simular el formato de Firestore para el render
-          const mockDocs = cached.map(d => ({ id: d.id, data: () => d }));
-          render(mockDocs);
-          if (!navigator.onLine) {
-            UX.hide();
-            return;
-          }
+      // 1. Carga Instantánea desde Caché Local (Zero-Read load)
+      if (!direction && !fechaInput.value && window.offlineStorage) {
+        const cached = await offlineStorage.getConfig('cuaderno-hoy');
+        if (cached && cached.length > 0) {
+          console.log('[registros] Carga instantánea desde caché (Zero-Read).');
+          render(cached.slice(0, 2).map(d => ({ id: d.id, data: () => d })));
+          UX.hide();
         }
+      }
+
+      // 2. Listeners en Tiempo Real + Persistencia Proactiva
+      if (!direction && !fechaInput.value) {
+        if (unsubscribeLive) unsubscribeLive();
+
+        UX.show('Sincronizando cuaderno...');
+        unsubscribeLive = db.collection('CUADERNO')
+          .where('cliente', '==', perfil.CLIENTE)
+          .where('unidad', '==', perfil.UNIDAD)
+          .orderBy('timestamp', 'desc')
+          .limit(2)
+          .onSnapshot(snap => {
+            console.log('[registros] Actualización en tiempo real recibida.');
+            const docs = snap.docs;
+            render(docs);
+
+            // Persistir actualizaciones en el caché local
+            if (window.offlineStorage && !snap.empty) {
+              const dataArray = docs.map(d => ({ id: d.id, ...d.data() }));
+              offlineStorage.saveConfig('cuaderno-hoy', dataArray);
+            }
+
+            if (!snap.empty) lastDoc = docs[docs.length - 1];
+            UX.hide();
+          }, err => {
+            console.error('[registros] Error live:', err);
+            UX.hide();
+          });
+        return;
+      }
+
+      // Si hay filtro o dirección, cancelar live
+      if (unsubscribeLive) {
+        unsubscribeLive();
+        unsubscribeLive = null;
       }
 
       let cursor = null;

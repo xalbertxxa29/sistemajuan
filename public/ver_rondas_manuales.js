@@ -12,9 +12,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     let lastDoc = null;
     let isFilterActive = false;
-    let userCliente = '';
-    let userUnidad = '';
     const LIMIT = 20;
+    let unsubscribeLive = null;
 
     // 1. Autenticación y Obtención de Perfil
     auth.onAuthStateChanged(async (user) => {
@@ -49,6 +48,43 @@ document.addEventListener('DOMContentLoaded', async () => {
             lastDoc = null;
             loadMoreContainer.style.display = 'none';
             allLoadedData = [];
+
+            // 1. Carga Instantánea desde Caché Local (Zero-Read load)
+            if (!dateVal && window.offlineStorage) {
+                const cached = await offlineStorage.getConfig('rondas-manuales-hoy');
+                if (cached && cached.length > 0) {
+                    console.log('[Rondas Manuales] Carga desde caché.');
+                    render(cached.slice(0, 2));
+                    loadMoreContainer.style.display = 'block'; // Mostrar botón por si acaso
+                }
+            }
+
+            // 2. Listeners en Tiempo Real + Persistencia Proactiva
+            if (!dateVal) {
+                if (unsubscribeLive) unsubscribeLive();
+                unsubscribeLive = db.collection('RONDA_MANUAL')
+                    .where('cliente', '==', userCliente)
+                    .where('unidad', '==', userUnidad)
+                    .orderBy('timestamp', 'desc')
+                    .limit(2)
+                    .onSnapshot(snap => {
+                        console.log('[Rondas Manuales] Update live');
+                        const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+                        render(data);
+
+                        // Persistir en caché local
+                        if (window.offlineStorage && !snap.empty) {
+                            offlineStorage.saveConfig('rondas-manuales-hoy', data);
+                        }
+
+                        if (!snap.empty) lastDoc = snap.docs[snap.docs.length - 1];
+                        if (snap.docs.length >= 2) loadMoreContainer.style.display = 'block';
+                    });
+                return;
+            } else if (unsubscribeLive) {
+                unsubscribeLive();
+                unsubscribeLive = null;
+            }
         }
 
         try {
@@ -75,11 +111,13 @@ document.addEventListener('DOMContentLoaded', async () => {
                 query = query.orderBy('timestamp', 'desc');
             }
 
-            // Paginación
+            // Paginación y límite dinámico
+            const finalLimit = (!dateVal && !isNextPage) ? 2 : LIMIT;
+
             if (isNextPage && lastDoc) {
                 query = query.startAfter(lastDoc);
             }
-            query = query.limit(LIMIT);
+            query = query.limit(finalLimit);
 
             const snapshot = await query.get();
 

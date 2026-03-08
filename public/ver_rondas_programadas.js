@@ -12,9 +12,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     let lastDoc = null;
     let isFilterActive = false;
-    let userCliente = '';
-    let userUnidad = '';
     const LIMIT = 20;
+    let unsubscribeLive = null;
 
     // 1. Autenticación y Obtención de Perfil
     auth.onAuthStateChanged(async (user) => {
@@ -48,15 +47,78 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Variables globales para reporte
     let allLoadedData = [];
 
+    // Helper para renderizar los datos (usado por onSnapshot y cargarRegistros)
+    function renderResults(dataArray) {
+        resultsList.innerHTML = '';
+        allLoadedData = []; // Reset on new render
+        if (dataArray.length === 0) {
+            resultsList.innerHTML = '<div class="info-msg">No se encontraron rondas programadas.</div>';
+            loadMoreContainer.style.display = 'none';
+            return;
+        }
+        dataArray.forEach(data => {
+            allLoadedData.push(data); // Store for report
+            const card = crearCard(data);
+            resultsList.appendChild(card);
+        });
+    }
+
     // 2. Cargar Registros
     async function cargarRegistros(isNextPage = false) {
+        const dateVal = filterDateInput.value; // Get dateVal here to be accessible for onSnapshot condition
+
         if (!isNextPage) {
             resultsList.innerHTML = '<div class="info-msg">Cargando...</div>';
             lastDoc = null;
             loadMoreContainer.style.display = 'none';
             allLoadedData = []; // Reset on new search
+
+            // 1. Carga Instantánea desde Caché Local (Zero-Read load)
+            if (!dateVal && window.offlineStorage) {
+                const cached = await offlineStorage.getConfig('rondas-programadas-hoy');
+                if (cached && cached.length > 0) {
+                    console.log('[Rondas Programadas] Carga desde caché.');
+                    renderResults(cached.slice(0, 2));
+                    loadMoreContainer.style.display = 'block';
+                }
+            }
+
+            // 2. Listeners en Tiempo Real + Persistencia Proactiva
+            if (!dateVal) { // Only use onSnapshot if no date filter is active
+                if (unsubscribeLive) unsubscribeLive(); // Unsubscribe previous listener
+                unsubscribeLive = db.collection('RONDAS_COMPLETADAS') // Changed to RONDAS_COMPLETADAS based on existing code
+                    .where('cliente', '==', userCliente)
+                    .where('unidad', '==', userUnidad)
+                    .orderBy('horarioInicio', 'desc')
+                    .limit(2)
+                    .onSnapshot(snap => {
+                        console.log('[Rondas Programadas] Update live');
+                        const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+                        renderResults(data); // Use the new render helper
+
+                        // Persistir en caché local
+                        if (window.offlineStorage && !snap.empty) {
+                            offlineStorage.saveConfig('rondas-programadas-hoy', data);
+                        }
+
+                        if (!snap.empty) lastDoc = snap.docs[snap.docs.length - 1];
+                        if (snap.docs.length >= 2) {
+                            loadMoreContainer.style.display = 'block';
+                        } else {
+                            loadMoreContainer.style.display = 'none';
+                        }
+                    }, error => {
+                        console.error("Error en onSnapshot:", error);
+                        resultsList.innerHTML = `<div class="info-msg" style="color:salmon;">Error en tiempo real: ${error.message}</div>`;
+                    });
+                return; // Exit function after setting up live listener
+            } else if (unsubscribeLive) { // If date filter is active, stop live listener
+                unsubscribeLive();
+                unsubscribeLive = null;
+            }
         }
 
+        // If a date filter is active or loading more, proceed with traditional query
         try {
             let query = db.collection('RONDAS_COMPLETADAS');
 
@@ -79,11 +141,13 @@ document.addEventListener('DOMContentLoaded', async () => {
                 query = query.orderBy('horarioInicio', 'desc');
             }
 
-            // Paginación
+            // Paginación y límite dinámico
+            const finalLimit = (!dateVal && !isNextPage) ? 2 : LIMIT;
+
             if (isNextPage && lastDoc) {
                 query = query.startAfter(lastDoc);
             }
-            query = query.limit(LIMIT);
+            query = query.limit(finalLimit);
 
             const snapshot = await query.get();
 

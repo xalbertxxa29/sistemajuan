@@ -72,7 +72,7 @@
 
                 console.log('[SyncEngine] 📥 Descargando nueva configuración...');
 
-                // 2. Descargas Masivas en Paralelo
+                // 2. Descargas Masivas en Paralelo (Limitar a los últimos 5 para deltas)
                 const [
                     qrs,
                     incidentTypes,
@@ -92,29 +92,30 @@
                     this._fetchIncidentTypes(CLIENTE, UNIDAD),
                     this._fetchConsignas(CLIENTE, UNIDAD, 'CONSIGNA_PERMANENTE'),
                     this._fetchConsignas(CLIENTE, UNIDAD, 'CONSIGNA_TEMPORAL'),
-                    this._fetchAccesosHoy(CLIENTE, UNIDAD, 'ACCESO_PEATONAL'),
-                    this._fetchAccesosHoy(CLIENTE, UNIDAD, 'ACCESO_VEHICULAR'),
-                    this._fetchAccesosHoy(CLIENTE, UNIDAD, 'INCIDENCIAS_REGISTRADAS'),
+                    this._fetchAccesosHoy(CLIENTE, UNIDAD, 'ACCESO_PEATONAL', 2),
+                    this._fetchAccesosHoy(CLIENTE, UNIDAD, 'ACCESO_VEHICULAR', 2),
+                    this._fetchAccesosHoy(CLIENTE, UNIDAD, 'INCIDENCIAS_REGISTRADAS', 2),
                     this._fetchCatalogosAcceso(),
                     this._fetchPuestos(CLIENTE, UNIDAD),
-                    this._fetchAccesosHoy(CLIENTE, UNIDAD, 'CUADERNO'),
+                    this._fetchAccesosHoy(CLIENTE, UNIDAD, 'CUADERNO', 2),
                     this._fetchDentro(CLIENTE, UNIDAD, 'ACCESO_VEHICULAR'),
                     this._fetchDentro(CLIENTE, UNIDAD, 'ACCESO_PEATONAL'),
                     this._fetchRondasDisponibles(CLIENTE, UNIDAD)
                 ]);
 
-                // 3. Guardar en Caché Local (IndexedDB)
+                // 3. Guardar en Caché Local usando MERGE para deltas
                 await Promise.all([
                     offlineStorage.saveConfig(this.RESOURCES.QRS, qrs),
                     offlineStorage.saveConfig(this.RESOURCES.INCIDENT_TYPES, incidentTypes),
                     offlineStorage.saveConfig(this.RESOURCES.CONSIGNAS_PERM, consignasPerm),
                     offlineStorage.saveConfig(this.RESOURCES.CONSIGNAS_TEMP, consignasTemp),
-                    offlineStorage.saveConfig(this.RESOURCES.ACCESO_PEATONAL_HOY, peatonalHoy),
-                    offlineStorage.saveConfig(this.RESOURCES.ACCESO_VEHICULAR_HOY, vehicularHoy),
-                    offlineStorage.saveConfig(this.RESOURCES.INCIDENCIAS_HOY, incidenciasHoy),
+                    // Sincronización de Historial (Pool de 2 para Caché Total)
+                    offlineStorage.mergeConfig(this.RESOURCES.ACCESO_PEATONAL_HOY, peatonalHoy),
+                    offlineStorage.mergeConfig(this.RESOURCES.ACCESO_VEHICULAR_HOY, vehicularHoy),
+                    offlineStorage.mergeConfig(this.RESOURCES.INCIDENCIAS_HOY, incidenciasHoy),
                     offlineStorage.saveConfig(this.RESOURCES.CATALOGOS_ACCESO, catalogosAcceso),
                     offlineStorage.saveConfig(this.RESOURCES.PUESTOS, puestos),
-                    offlineStorage.saveConfig(this.RESOURCES.CUADERNO_HOY, cuadernoHoy),
+                    offlineStorage.mergeConfig(this.RESOURCES.CUADERNO_HOY, cuadernoHoy),
                     offlineStorage.saveConfig(this.RESOURCES.VEHICULOS_DENTRO, vehiculosDentro),
                     offlineStorage.saveConfig(this.RESOURCES.PEATONES_DENTRO, peatonesDentro),
                     offlineStorage.saveConfig(this.RESOURCES.RONDAS_DISPONIBLES, rondasDisponibles),
@@ -161,31 +162,30 @@
             return snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         },
 
-        async _fetchAccesosHoy(cliente, unidad, coleccion) {
+        async _fetchAccesosHoy(cliente, unidad, coleccion, limit = 50) {
             const now = new Date();
             const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
             // Intentar filtrar por 'timestamp' (milisegundos) o 'createdAt' (FieldValue)
-            // Según el módulo, el campo varía.
             const field = coleccion === 'ACCESO_VEHICULAR' ? 'timestamp' : 'createdAt';
-            const value = coleccion === 'ACCESO_VEHICULAR' ? startOfDay.getTime() : startOfDay;
 
-            // Nota: El filtrado exacto depende de los índices. Si falla, bajamos todo el histórico (no recomendado)
-            // o simplemente limitamos a los últimos 50 registros para el "Hoy".
             try {
                 const isAcceso = coleccion === 'ACCESO_VEHICULAR' || coleccion === 'ACCESO_PEATONAL';
                 const isCuaderno = coleccion === 'CUADERNO';
+                const isIncidencias = coleccion === 'INCIDENCIAS_REGISTRADAS';
 
                 let query = db.collection(coleccion)
                     .where(isAcceso ? (coleccion === 'ACCESO_VEHICULAR' ? 'cliente' : 'CLIENTE') : 'cliente', '==', cliente.toUpperCase())
-                    .where(isAcceso ? (coleccion === 'ACCESO_VEHICULAR' ? 'unidad' : 'UNIDAD') : 'unidad', '==', unidad.toUpperCase());
+                    .where(isAcceso ? (coleccion === 'ACCESO_VEHICULAR' ? 'unidad' : 'UNIDAD') : 'UNIDAD', '==', unidad.toUpperCase());
 
-                // Solo ordenar si NO es cuaderno para evitar el error de índice reportado
-                if (!isCuaderno) {
-                    query = query.orderBy(field, 'desc');
+                // Ordenar por defecto para el fetch de "Hoy"
+                if (isAcceso || isIncidencias || isCuaderno) {
+                    // Para incidiencias registradas, el campo es 'timestamp'
+                    const sortField = isIncidencias ? 'timestamp' : (isAcceso ? (coleccion === 'ACCESO_VEHICULAR' ? 'timestamp' : 'FECHA_INGRESO') : 'timestamp');
+                    query = query.orderBy(sortField, 'desc');
                 }
 
-                const snap = await query.limit(50).get();
+                const snap = await query.limit(limit).get();
                 return snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             } catch (err) {
                 console.warn(`[Sync] Falló fetch optimizado para ${coleccion}:`, err.message);

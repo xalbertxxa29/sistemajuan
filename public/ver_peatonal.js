@@ -25,6 +25,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let perfil = null;            // { CLIENTE, UNIDAD }
     let lastDoc = null;           // cursor para "siguiente"
     let pageStack = [];           // pila de primeros docs por página para retroceder
+    let unsubscribeLive = null;   // Listener en tiempo real
 
     // ---------- Sesión ----------
     auth.onAuthStateChanged(async (user) => {
@@ -73,9 +74,10 @@ document.addEventListener('DOMContentLoaded', () => {
             ref = ref.where('FECHA_INGRESO', '==', fechaInput.value);
         }
 
-        // Simplificado: Ordenar solo por FECHA_INGRESO para reducir requisitos de índice compuesto
-        // IMPORTANTE: Si Firestore sigue pidiendo índice, se verá en el mensaje de error en pantalla.
-        ref = ref.orderBy('FECHA_INGRESO', 'desc').limit(PAGE_SIZE);
+        // Determinar límite: 2 para carga inicial sin filtro, PAGE_SIZE para otros casos
+        const finalLimit = (!fechaInput.value && !direction && !cursor) ? 2 : PAGE_SIZE;
+
+        ref = ref.orderBy('FECHA_INGRESO', 'desc').limit(finalLimit);
 
         if (direction === 'next' && cursor) ref = ref.startAfter(cursor);
         if (direction === 'prev' && cursor) ref = ref.endBefore(cursor).limitToLast(PAGE_SIZE);
@@ -176,22 +178,49 @@ document.addEventListener('DOMContentLoaded', () => {
         UX.show('Cargando historial peatonal…');
 
         try {
-            // 1. Intentar Carga desde Cache (Solo al inicio, sin dirección de paginación)
-            if (!direction && window.offlineStorage) {
-                const cached = await window.offlineStorage.getConfig('peatonal-hoy');
+            // 1. Carga Instantánea desde Caché Local (Zero-Read load)
+            if (!direction && !fechaInput.value && window.offlineStorage) {
+                const cached = await offlineStorage.getConfig('acceso-peatonal-hoy');
                 if (cached && cached.length > 0) {
-                    console.log('[ver_peatonal] Cargando desde cache local (HOY).');
-                    allLoadedData = cached;
-                    // Simular estructura de docs para el render si es necesario, 
-                    // pero render() aquí espera array de snap.docs. 
-                    // MODIFICAREMOS render para aceptar data directa.
-                    renderData(cached);
-
-                    if (!navigator.onLine) {
-                        UX.hide();
-                        return;
-                    }
+                    console.log('[ver_peatonal] Carga instantánea desde caché (Zero-Read).');
+                    renderData(cached.slice(0, 2));
+                    UX.hide();
                 }
+            }
+
+            // 2. Listeners en Tiempo Real + Persistencia Proactiva
+            if (!direction && !fechaInput.value) {
+                if (unsubscribeLive) unsubscribeLive();
+
+                UX.show('Sincronizando peatonal...');
+                unsubscribeLive = db.collection('ACCESO_PEATONAL')
+                    .where('CLIENTE', '==', perfil.CLIENTE)
+                    .where('UNIDAD', '==', perfil.UNIDAD)
+                    .orderBy('FECHA_INGRESO', 'desc')
+                    .limit(2)
+                    .onSnapshot(snap => {
+                        console.log('[Peatonal] Update live recibido');
+                        const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+                        renderData(data);
+
+                        // Persistir en caché local
+                        if (window.offlineStorage && !snap.empty) {
+                            offlineStorage.saveConfig('acceso-peatonal-hoy', data);
+                        }
+
+                        if (!snap.empty) lastDoc = snap.docs[snap.docs.length - 1];
+                        UX.hide();
+                    }, err => {
+                        console.error('[Peatonal] Error live:', err);
+                        UX.hide();
+                    });
+                return;
+            }
+
+            // Cancelar live si hay filtro
+            if (unsubscribeLive) {
+                unsubscribeLive();
+                unsubscribeLive = null;
             }
 
             let cursor = null;
