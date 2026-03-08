@@ -420,14 +420,29 @@ document.addEventListener('DOMContentLoaded', async () => {
           iniciarCronometro();
         }
       } else {
-        // Intentar recuperar del cache local si no hay red
+        // Intentar recuperar del cache local si no hay red o Internet falla
         if (window.offlineStorage) {
           const cacheData = await buscarRondaEnCachePorUsuario(userEmail);
           if (cacheData) {
+            const rondaId = cacheData.id;
+            const data = cacheData.data;
+
+            // 🔍 VALIDACIÓN EXTRA: Si hay red, confirmar con el servidor que NO ha terminado
+            if (navigator.onLine) {
+              try {
+                const serverDoc = await db.collection('RONDAS_COMPLETADAS').doc(rondaId).get();
+                if (serverDoc.exists && serverDoc.data().estado !== 'EN_PROGRESO') {
+                  console.log('[Ronda] ⚠️ Sesión de caché ya terminó en el servidor. Limpiando...');
+                  await RONDA_STORAGE.limpiarCache(rondaId);
+                  return; // Salir para que cargue la lista normal
+                }
+              } catch (e) { console.warn('Error validando cache contra server', e); }
+            }
+
             console.log('[Ronda] 📂 Recuperado del cache offline');
-            rondaEnProgreso = cacheData.data;
-            rondaIdActual = cacheData.id;
-            cerrarModalTipoRonda(); // 🔴 FIX: Ocultar selección si ya hay ronda activa
+            rondaEnProgreso = data;
+            rondaIdActual = rondaId;
+            cerrarModalTipoRonda();
             mostrarRondaEnProgreso();
             iniciarCronometro();
           }
