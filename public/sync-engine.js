@@ -45,32 +45,35 @@
             try {
                 if (window.UI && UI.updateOfflineBadge) UI.updateOfflineBadge('syncing');
 
-                // --- NUEVO: THROTTLE POR TIEMPO (10 MINUTOS) ---
-                const SYNC_THROTTLE_MS = 10 * 60 * 1000; // 10 minutos
+                // --- 🟢 SINCRONIZACIÓN INTELIGENTE: COOLDOWN DE METADATOS (2 MINUTOS) ---
+                const METADATA_COOLDOWN_MS = 2 * 60 * 1000; // 2 minutos
                 const lastCheck = await offlineStorage.getGlobalData(`last-sync-check-${CLIENTE}-${UNIDAD}`);
                 const now = Date.now();
 
-                if (!force && lastCheck && (now - lastCheck < SYNC_THROTTLE_MS)) {
-                    console.log(`[SyncEngine] ⏳ Sincronización omitida (última hace ${Math.round((now - lastCheck) / 1000)}s).`);
+                if (!force && lastCheck && (now - lastCheck < METADATA_COOLDOWN_MS)) {
+                    console.log(`[SyncEngine] ⏳ Chequeo omitido (Cooldown activo: ${Math.round((now - lastCheck) / 1000)}s).`);
                     if (window.UI && UI.updateOfflineBadge) UI.updateOfflineBadge('done');
                     return true;
                 }
 
-                // 1. Verificar Metadatos de Versión
+                // 1. Verificar Metadatos de Versión (Silencioso)
                 const metaPath = `CONFIG_METADATA/${CLIENTE}_${UNIDAD}`;
                 const metaDoc = await db.doc(metaPath).get().catch(() => null);
                 const serverVersion = metaDoc && metaDoc.exists ? metaDoc.data().version : Date.now();
                 const localVersion = await offlineStorage.getGlobalData(`sync-version-${CLIENTE}-${UNIDAD}`);
 
                 if (!force && localVersion && localVersion >= serverVersion) {
-                    console.log('[SyncEngine] ✅ Configuración actualizada. No se requiere descarga.');
-                    // Actualizamos el last-check incluso si no hubo descarga porque confirmamos que estamos al día
+                    console.log('[SyncEngine] ✅ Todo al día. Sin descargas necesarias.');
                     await offlineStorage.setGlobalData(`last-sync-check-${CLIENTE}-${UNIDAD}`, now);
                     if (window.UI && UI.updateOfflineBadge) UI.updateOfflineBadge('done');
                     return true;
                 }
 
-                console.log('[SyncEngine] 📥 Descargando nueva configuración...');
+                // 2. ACTIVACIÓN DE UI BAJO DEMANDA (Solo si hay cambios)
+                console.log('[SyncEngine] 📥 Cambios detectados. Iniciando descarga...');
+                if (window.UI && UI.showOverlay) {
+                    UI.showOverlay('Actualizando información del sistema...');
+                }
 
                 // 2. Descargas Masivas en Paralelo (Limitar a los últimos 5 para deltas)
                 const [
@@ -120,7 +123,15 @@
                     offlineStorage.saveConfig(this.RESOURCES.PEATONES_DENTRO, peatonesDentro),
                     offlineStorage.saveConfig(this.RESOURCES.RONDAS_DISPONIBLES, rondasDisponibles),
                     offlineStorage.setGlobalData(`sync-version-${CLIENTE}-${UNIDAD}`, serverVersion),
-                    offlineStorage.setGlobalData(`last-sync-check-${CLIENTE}-${UNIDAD}`, Date.now())
+                    offlineStorage.setGlobalData(`last-sync-check-${CLIENTE}-${UNIDAD}`, Date.now()),
+                    // PERSISTENCIA EXTRA DEL PERFIL PARA EVITAR BLOQUEOS
+                    offlineStorage.setUserData({
+                        email: userProfile.email || '',
+                        userId: (userProfile.email || '').split('@')[0],
+                        cliente: CLIENTE,
+                        unidad: UNIDAD,
+                        puesto: userProfile.PUESTO || userProfile.puesto || ''
+                    })
                 ]);
 
                 console.log(`[SyncEngine] 🎉 Sincronización completada.`);
@@ -131,10 +142,13 @@
                 console.log(`- Dentro: ${vehiculosDentro.length} Veh / ${peatonesDentro.length} Peat`);
                 console.log(`- Rondas Disponibles: ${rondasDisponibles.length}`);
 
+                console.log(`[SyncEngine] 🎉 Sincronización completada.`);
+                if (window.UI && UI.hideOverlay) UI.hideOverlay();
                 if (window.UI && UI.updateOfflineBadge) UI.updateOfflineBadge('done');
                 return true;
             } catch (e) {
                 console.error('[SyncEngine] ❌ Error en sincronización global:', e);
+                if (window.UI && UI.hideOverlay) UI.hideOverlay();
                 if (window.UI && UI.updateOfflineBadge) UI.updateOfflineBadge(0);
                 return false;
             }

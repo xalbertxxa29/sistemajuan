@@ -178,27 +178,37 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!user) { setTimeout(() => { if (!auth.currentUser) window.location.href = 'index.html'; }, 150); return; }
 
     try {
-      UX.show('Cargando perfil...');
       const userId = user.email.split('@')[0];
 
-      // OPTIMIZACIÓN "ZERO-READ": Usar el caché global centralizado
+      // 1. CARGA RÁPIDA DESDE CACHÉ (Zero-Wait)
+      if (window.offlineStorage) {
+        const localUser = await offlineStorage.getUserData();
+        if (localUser && localUser.cliente) {
+          currentUserProfile = { ...localUser, id: userId };
+          console.log('[Incidente] Perfil cargado desde caché.');
+          cargarTiposIncidente(); // Carga inmediata del caché
+        }
+      }
+
+      // 2. SINCRONIZACIÓN DE PERFIL (Fondo)
       let userData = null;
       if (window.getUserProfile) {
         userData = await window.getUserProfile(userId);
       } else {
-        const prof = await db.collection('USUARIOS').doc(userId).get();
-        if (prof.exists) userData = prof.data();
+        const prof = await db.collection('USUARIOS').doc(userId).get({ source: 'cache' }).catch(() => null);
+        if (prof && prof.exists) userData = prof.data();
       }
 
       if (userData) {
         currentUserProfile = { ...userData, id: userId };
+        // Refrescar si hubo cambios o si no se cargó el local
         await cargarTiposIncidente();
-      } else {
+      } else if (!currentUserProfile) {
         throw new Error('No se encontró tu perfil.');
       }
     } catch (e) {
       console.error('[Incidente] Error cargando perfil:', e);
-      UX.alert('Error', 'No se pudo cargar tu perfil. Revisa tu conexión o caché.');
+      if (!currentUserProfile) UX.alert('Error', 'No se pudo cargar tu perfil. Revisa tu conexión.');
     } finally { UX.hide(); }
   });
 

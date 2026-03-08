@@ -202,7 +202,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   async function intentarCargarOffline(retries = 3) {
     console.log(`[Ronda] Intentando cargar perfil offline... (Intentos: ${retries})`);
 
-    if (!window.offlineStorage || !window.offlineStorage.db) {
+    if (!window.offlineStorage) {
       if (retries > 0) {
         return new Promise(resolve => {
           setTimeout(async () => {
@@ -211,7 +211,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           }, 100);
         });
       } else {
-        console.warn('[Ronda] OfflineStorage no listo tras reintentos cortos.');
+        console.warn('[Ronda] OfflineStorage no encontrado tras reintentos.');
         return;
       }
     }
@@ -257,21 +257,23 @@ document.addEventListener('DOMContentLoaded', async () => {
     const userId = user.email.split('@')[0];
     userCtx.userId = userId;
 
-    // 1. CARGA OFFLINE AL INSTANTE (No bloqueante)
-    let perfilOfflineCargado = false;
-    await intentarCargarOffline().then(() => {
-      perfilOfflineCargado = true;
-    });
+    // 1. CARGA OFFLINE AL INSTANTE (Ya no bloquea todo el flujo)
+    await intentarCargarOffline();
+
+    // 🚀 MOSTRAR MODAL SI TENEMOS PERFIL (Incluso si getUserProfile falla o tarda)
+    if (userCtx.cliente && userCtx.unidad) {
+      ocultarOverlay();
+      mostrarModalTipoRonda();
+    }
 
     try {
-      // 2. VERIFICACIÓN FIRESTORE OPTIMIZADA (desde caché si es posible)
+      // 2. VERIFICACIÓN FIRESTORE OPTIMIZADA (fondo)
       let datos = null;
       if (window.getUserProfile) {
         datos = await window.getUserProfile(userId);
       } else {
-        // Fallback robusto
-        const doc = await db.collection('USUARIOS').doc(userId).get();
-        if (doc.exists) datos = doc.data();
+        const doc = await db.collection('USUARIOS').doc(userId).get({ source: 'cache' }).catch(() => null);
+        if (doc && doc.exists) datos = doc.data();
       }
 
       let nombres = '';
@@ -284,21 +286,20 @@ document.addEventListener('DOMContentLoaded', async () => {
         nombres = (datos.NOMBRES || datos.nombres || '').trim();
         apellidos = (datos.APELLIDOS || datos.apellidos || '').trim();
         userCtx.nombre = `${nombres} ${apellidos}`.trim();
+
+        // Actualizar UI con datos frescos si cambiaron
+        const dispUsuario = document.getElementById('displayUsuario');
+        if (dispUsuario) dispUsuario.textContent = userCtx.nombre;
       }
 
-      // 3. CONTINUAR FLUJO NORMAL: Cargas paralelas para acelerar UI
-      const tareasParalelas = [];
-      tareasParalelas.push(verificarRondaEnProgreso(userCtx.email));
+      // 3. CONTINUAR FLUJO: Verificar estado de ronda (Fondo)
+      const checkRonda = verificarRondaEnProgreso(userCtx.email);
 
       if (userCtx.cliente && userCtx.unidad) {
-        tareasParalelas.push(cargarRondas());       // Tarda si está online, usa caché si offline
-      } else {
-        console.warn("[Ronda] No hay Cliente/Unidad validos para cargar rondas.");
+        cargarRondas(); // No bloqueante
       }
 
-      await Promise.all(tareasParalelas);
-
-      // 🚀 OCULTAR OVERLAY DE CARGA INICIAL
+      await checkRonda;
       ocultarOverlay();
 
       // 🚀 GUARDAR PERFIL PARA OFFLINE
@@ -347,9 +348,20 @@ document.addEventListener('DOMContentLoaded', async () => {
         .where('estado', '==', 'EN_PROGRESO')
         .where('usuarioEmail', '==', userEmail);
 
-      let snapshot = await emailQuery.get();
+      const timeoutQuery = new Promise(resolve => setTimeout(() => resolve('TIMEOUT'), 4000));
+      const fetchQuery = emailQuery.get();
 
-      if (snapshot.empty && userCtx.userId) {
+      let snapshot;
+      const res = await Promise.race([fetchQuery, timeoutQuery]);
+
+      if (res === 'TIMEOUT') {
+        console.warn('[Ronda] Timeout verificando ronda, intentando cache local Firestore...');
+        snapshot = await emailQuery.get({ source: 'cache' }).catch(() => ({ empty: true }));
+      } else {
+        snapshot = res;
+      }
+
+      if ((!snapshot || snapshot.empty) && userCtx.userId) {
         // Fallback por nombre para compatibilidad
         const nameQuery = db.collection('RONDAS_COMPLETADAS')
           .where('estado', '==', 'EN_PROGRESO')
